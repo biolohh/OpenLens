@@ -121,7 +121,7 @@ struct SettingsView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
-        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        .compatSoftScrollEdge(for: .bottom)
         .onChange(of: liveActivitiesEnabled) { _, enabled in
             if !enabled {
                 liveActivity.dismissAll()

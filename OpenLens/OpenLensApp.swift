@@ -486,7 +486,7 @@ struct OpenLensApp: App {
             }
             .animation(.easeInOut(duration: 0.45), value: isShowingConnectScreen)
             .openLensTheme(OpenLensAppearance.fallback.theme)
-            .scrollEdgeEffectStyle(.soft, for: .top)
+            .compatSoftScrollEdge(for: .top)
             .environment(\.liveActivity, liveActivity)
             .environment(\.savedConnections, savedConnectionsStore)
             .environment(\.sessionsService, sessionsService)

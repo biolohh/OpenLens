@@ -407,7 +407,7 @@ struct MicroRootView: View {
         let focusedState = focused.map { agentState(for: $0) } ?? .idle
         let columns = Array(repeating: GridItem(.flexible(minimum: 0), spacing: 9), count: 4)
 
-        return GlassEffectContainer(spacing: 9) {
+        return CompatGlassEffectContainer(spacing: 9) {
             LazyVGrid(columns: columns, spacing: 9) {
                 ForEach(controllerGridSlots) { slot in
                     controllerGridSlot(
@@ -1614,9 +1614,9 @@ private extension View {
         interactive: Bool = false
     ) -> some View {
         if interactive {
-            glassEffect(.regular.tint(tint.opacity(0.20)).interactive(), in: .rect(cornerRadius: cornerRadius))
+            compatGlassEffect(tint: tint.opacity(0.20), interactive: true, in: .rect(cornerRadius: cornerRadius))
         } else {
-            glassEffect(.regular.tint(tint.opacity(0.15)), in: .rect(cornerRadius: cornerRadius))
+            compatGlassEffect(tint: tint.opacity(0.15), in: .rect(cornerRadius: cornerRadius))
         }
     }
 }

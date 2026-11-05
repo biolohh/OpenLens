@@ -27,7 +27,11 @@ struct NewSessionIntent: AppIntent {
     static let description = IntentDescription("Asks for a name, then opens OpenLens and starts a new chat session.")
     // The system resolves `name` before switching to the app, so the prompt appears in
     // Spotlight or Siri first.
+    @available(iOS 26.0, *)
     static var supportedModes: IntentModes { .foreground(.immediate) }
+    // iOS 18 fallback for `supportedModes` (ios18 branch): open the app after the
+    // parameter is resolved. Ignored on iOS 26, where `supportedModes` wins.
+    static let openAppWhenRun: Bool = true
 
     static var parameterSummary: some ParameterSummary {
         Summary("Start a new session named \(\.$name)")

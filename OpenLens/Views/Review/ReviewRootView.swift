@@ -173,8 +173,8 @@ struct ReviewRootView: View {
                 }
             }
         }
-        .scrollEdgeEffectStyle(.soft, for: .bottom)
-        .safeAreaBar(edge: .top, spacing: 8) {
+        .compatSoftScrollEdge(for: .bottom)
+        .compatSafeAreaBar(edge: .top, spacing: 8) {
             if !isReviewReloading, let reviewSnapshot, !reviewSnapshot.changeSets.isEmpty {
                 scopeBar(reviewSnapshot)
             }
@@ -208,7 +208,7 @@ struct ReviewRootView: View {
                 }
             }
         }
-        .sharedBackgroundVisibility(.hidden)
+        .compatHiddenSharedBackground()
     }
 
     private var inboxToolbarItem: some ToolbarContent {

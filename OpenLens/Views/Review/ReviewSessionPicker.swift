@@ -28,7 +28,7 @@ struct ReviewSessionPickerCapsule: View {
 
     var body: some View {
         Button(action: action) {
-            GlassEffectContainer(spacing: 6) {
+            CompatGlassEffectContainer(spacing: 6) {
                 VStack(spacing: 2) {
                     titleCapsule
                     totalsCapsule
@@ -57,7 +57,7 @@ struct ReviewSessionPickerCapsule: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .frame(maxWidth: 240)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .compatGlassEffect(interactive: true, in: Capsule())
     }
 
     /// Always mounted so the merged shape never changes. It starts at zero and
@@ -75,7 +75,7 @@ struct ReviewSessionPickerCapsule: View {
         .monospacedDigit()
         .padding(.horizontal, 10)
         .padding(.vertical, 3)
-        .glassEffect(.regular.interactive(), in: Capsule())
+        .compatGlassEffect(interactive: true, in: Capsule())
         .animation(.snappy(duration: 0.28), value: totals)
     }
 

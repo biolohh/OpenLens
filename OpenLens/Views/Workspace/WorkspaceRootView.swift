@@ -195,7 +195,7 @@ struct WorkspaceRootView: View {
             changedFilesSection
             filesSection
         }
-        .scrollEdgeEffectStyle(.soft, for: .bottom)
+        .compatSoftScrollEdge(for: .bottom)
     }
 
     // MARK: - Project
@@ -228,7 +228,7 @@ struct WorkspaceRootView: View {
                 )
             }
         }
-        .sharedBackgroundVisibility(.hidden)
+        .compatHiddenSharedBackground()
     }
 
     private var projectSelection: Binding<String> {

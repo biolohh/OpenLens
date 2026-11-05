@@ -1,0 +1,65 @@
+# Builds the iOS 18 sideload IPA on a GitHub macOS runner (no Mac needed at home)
+# and publishes it, together with a SideStore source, as the latest release.
+# SideStore source URL to add on the iPhone:
+#   https://github.com/<owner>/<repo>/releases/latest/download/sidestore-source.json
+name: iOS 18 IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ios18]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build IPA
+        run: |
+          sed -i '' "s/CURRENT_PROJECT_VERSION: 1$/CURRENT_PROJECT_VERSION: ${GITHUB_RUN_NUMBER}/" project.yml
+          scripts/build-ipa-ios18.sh build/ipa
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+
+      - name: SideStore source
+        run: |
+          APP=build/DerivedData/Build/Products/Release-iphoneos/OpenLens.app
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Info.plist")
+          BUILD=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Info.plist")
+          BUNDLE=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
+          SIZE=$(stat -f%z build/ipa/OpenLens.ipa)
+          URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/ios18-${GITHUB_RUN_NUMBER}/OpenLens.ipa"
+          jq -n --arg v "$VERSION" --arg b "$BUILD" --arg id "$BUNDLE" --arg url "$URL" \
+                --argjson size "$SIZE" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --arg sha "${GITHUB_SHA::7}" '{
+            name: "OpenLens iOS 18 (unofficial backport)",
+            identifier: "net.wonded.openlens.source",
+            apps: [{
+              name: "OpenLens", bundleIdentifier: $id, developerName: "Martyn Pekala (backport: wonded)",
+              localizedDescription: "OpenCode companion app, iOS 18 backport of github.com/martynpekala/OpenLens (MIT).",
+              iconURL: "https://raw.githubusercontent.com/martynpekala/OpenLens/main/appstore-clipart.png",
+              versions: [{ version: $v, buildVersion: $b, date: $date, size: $size, downloadURL: $url,
+                           localizedDescription: ("Build " + $b + " from " + $sha), minOSVersion: "18.0" }]
+            }]
+          }' > build/ipa/sidestore-source.json
+          cat build/ipa/sidestore-source.json
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "ios18-${GITHUB_RUN_NUMBER}" build/ipa/OpenLens.ipa build/ipa/sidestore-source.json \
+            --title "OpenLens iOS 18 build ${GITHUB_RUN_NUMBER}" \
+            --notes "Backport of ${GITHUB_SHA::7} for iOS 18 (SideStore). Unsigned for distribution; SideStore re-signs it." \
+            --latest

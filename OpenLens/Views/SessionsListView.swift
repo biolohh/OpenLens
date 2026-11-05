@@ -141,7 +141,7 @@ struct SessionsListView: View {
 
     var body: some View {
         presentationContent
-            .scrollEdgeEffectStyle(.soft, for: .bottom)
+            .compatSoftScrollEdge(for: .bottom)
         .background(isSidebar ? Color.clear : Color.appBackground)
         .sheet(item: $newSessionRequest) { _ in
             NewSessionSheet(newSessionModel: newSessionModel) { session in
@@ -210,7 +210,7 @@ struct SessionsListView: View {
                         ToolbarItem(placement: .principal) {
                             ConnectedHostCapsule(host: host, isReconnecting: connection.isReconnecting)
                         }
-                        .sharedBackgroundVisibility(.hidden)
+                        .compatHiddenSharedBackground()
                     }
                 }
         }
@@ -222,7 +222,7 @@ struct SessionsListView: View {
                 .font(.system(size: 24, weight: .medium))
                 .foregroundStyle(Color.appOnNeutralAction)
         }
-        .buttonStyle(.glassProminent)
+        .compatGlassProminentButtonStyle()
         .buttonBorderShape(.circle)
         .controlSize(.large)
         .tint(Color.appNeutralAction)
@@ -1084,7 +1084,7 @@ private struct ConnectedHostCapsule: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .glassEffect(.regular, in: Capsule())
+        .compatGlassEffect(in: Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(AppText.sessions), \(host)")
     }

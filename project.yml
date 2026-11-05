@@ -52,7 +52,7 @@ settings:
     GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
     GCC_WARN_UNUSED_FUNCTION: YES
     GCC_WARN_UNUSED_VARIABLE: YES
-    IPHONEOS_DEPLOYMENT_TARGET: 26.0
+    IPHONEOS_DEPLOYMENT_TARGET: 18.0
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
     SDKROOT: iphoneos
     SWIFT_APPROACHABLE_CONCURRENCY: YES
@@ -98,7 +98,7 @@ targets:
   OpenLens:
     type: application
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "18.0"
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
@@ -148,7 +148,7 @@ targets:
   OpenLensActivityWidgetExtension:
     type: app-extension
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "18.0"
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig
@@ -162,6 +162,7 @@ targets:
         buildPhase: resources
       - path: OpenLens/Models/OpenLensActivityAttributes.swift
       - path: OpenLens/Models/SharedConnectionStore.swift
+      - path: OpenLens/Models/AppGroupResolver.swift
       - path: OpenLens/Models/LiveActivityIntents.swift
     settings:
       base:
@@ -191,7 +192,7 @@ targets:
   OpenLensTests:
     type: bundle.unit-test
     platform: iOS
-    deploymentTarget: "26.0"
+    deploymentTarget: "18.0"
     configFiles:
       Debug: Config/Signing.xcconfig
       Release: Config/Signing.xcconfig

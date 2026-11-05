@@ -133,7 +133,7 @@ struct ChatModeChipChrome: ViewModifier {
                 content
                     .background(Color.appTertiary)
                     .clipShape(Capsule())
-                    .glassEffect()
+                    .compatGlassEffect(in: Capsule())
             } else {
                 content
                     .background(Color.appTertiary)
@@ -152,7 +152,7 @@ struct ChatComposerFieldChrome: ViewModifier {
                 .modifier(RetroChatPanelChrome(fill: RetroChatStyle.paper, cornerRadius: 7))
         } else {
             content
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .compatGlassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .stroke(Color.appSeparator.opacity(0.8), lineWidth: 1)
@@ -197,7 +197,7 @@ struct ChatHeaderStatusChrome: ViewModifier {
                 }
         } else {
             content
-                .glassEffect(.regular, in: Capsule())
+                .compatGlassEffect(in: Capsule())
         }
     }
 }

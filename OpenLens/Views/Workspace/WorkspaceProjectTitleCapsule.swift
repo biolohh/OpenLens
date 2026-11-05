@@ -28,7 +28,7 @@ struct WorkspaceProjectTitleCapsule: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
         .frame(maxWidth: 240)
-        .glassEffect(isSelectable ? .regular.interactive() : .regular, in: Capsule())
+        .compatGlassEffect(interactive: isSelectable, in: Capsule())
         .contentShape(Capsule())
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Project, \(title)")
