@@ -84,7 +84,7 @@ struct ModelPickerView: View {
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    Button(role: .close) {
+                    CompatCloseButton {
                         dismiss()
                     }
                 }

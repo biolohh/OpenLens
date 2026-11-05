@@ -42,19 +42,44 @@ struct ConnectedRootView: View {
                     } label: {
                         tabLabel(for: .workspace, selectedTab: router.selectedTab)
                     }
+                    // ios18 branch: `TabRole.prominent` and `anyAppleOS` need the iOS 27 SDK
+                    // (Xcode 27); with Xcode 26 only the iOS 26 search-role tab is compiled.
+                    // Before iOS 26 the settings tab is a plain tab (no detached search slot).
+                    #if compiler(>=6.4)
                     if #available(anyAppleOS 27.0, *) {
                         Tab(value: AppTab.settings, role: .prominent) {
                             tabNavigationView(for: .settings)
                         } label: {
                             tabLabel(for: .settings, selectedTab: router.selectedTab)
                         }
-                    } else {
+                    } else if #available(iOS 26.0, *) {
                         Tab(value: AppTab.settings, role: .search) {
                             tabNavigationView(for: .settings)
                         } label: {
                             tabLabel(for: .settings, selectedTab: router.selectedTab)
                         }
+                    } else {
+                        Tab(value: AppTab.settings) {
+                            tabNavigationView(for: .settings)
+                        } label: {
+                            tabLabel(for: .settings, selectedTab: router.selectedTab)
+                        }
                     }
+                    #else
+                    if #available(iOS 26.0, *) {
+                        Tab(value: AppTab.settings, role: .search) {
+                            tabNavigationView(for: .settings)
+                        } label: {
+                            tabLabel(for: .settings, selectedTab: router.selectedTab)
+                        }
+                    } else {
+                        Tab(value: AppTab.settings) {
+                            tabNavigationView(for: .settings)
+                        } label: {
+                            tabLabel(for: .settings, selectedTab: router.selectedTab)
+                        }
+                    }
+                    #endif
                 }
             }
         }

@@ -117,3 +117,25 @@ private enum LegacyGlass {
         return glass
     }
 }
+
+/// `Button(role: .close)` on iOS 26+ (system X glyph, glass); before iOS 26 the
+/// close role does not exist, so it draws the same X as a plain toolbar button.
+struct CompatCloseButton: View {
+    let action: () -> Void
+
+    init(action: @escaping () -> Void) {
+        self.action = action
+    }
+
+    var body: some View {
+        if #available(iOS 26.0, *) {
+            Button(role: .close, action: action)
+        } else {
+            Button(action: action) {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+            }
+            .accessibilityLabel("Close")
+        }
+    }
+}

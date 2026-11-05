@@ -30,7 +30,7 @@ struct OpenCodeV2SupportView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .close) { dismiss() }
+                    CompatCloseButton { dismiss() }
                         .accessibilityIdentifier("openCodeV2Support.close")
                 }
             }

@@ -31,7 +31,7 @@ struct SessionActiveContextView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(role: .close) { dismiss() }
+                    CompatCloseButton { dismiss() }
                 }
             }
         }

@@ -790,7 +790,7 @@ private struct ConnectionSetupTipsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .close) { dismiss() }
+                    CompatCloseButton { dismiss() }
                         .accessibilityIdentifier("connection.setup.tips.done")
                 }
             }
