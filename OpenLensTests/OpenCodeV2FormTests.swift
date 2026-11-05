@@ -875,7 +875,16 @@ struct OpenCodeV2FormTests {
         #expect(descendants(window).compactMap { $0 as? UITextField }.first?.text == "Edited release")
     }
 
-    @MainActor @Test(arguments: ["eq", "neq"])
+    // ios18 branch: before iOS 26, in this hosted-window harness the toolbar's
+    // UIBarButtonItem.isEnabled does not follow the SwiftUI `.disabled` state, so the
+    // UIKit-level check below cannot see Submit turning off (the real UI does disable it).
+    // On iOS 18 the real UI is covered by OpenLensUITests.testConditionalFormSubmitFollowsValidity.
+    @MainActor @Test(
+        .disabled(
+            if: !ProcessInfo.processInfo.isOperatingSystemAtLeast(
+                OperatingSystemVersion(majorVersion: 26, minorVersion: 0, patchVersion: 0)),
+            "UIBarButtonItem.isEnabled is not synced before iOS 26; covered by OpenLensUITests"),
+        arguments: ["eq", "neq"])
     func optionalBooleanStartsUnansweredAndSubmitsOnlyTheChosenBranch(op: String) async throws {
         let value = op == "eq" ? "false" : "true"
         let form = try JSONDecoder().decode(OCFormRequest.self, from: Data("""

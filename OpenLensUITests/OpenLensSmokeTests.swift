@@ -52,6 +52,49 @@ final class OpenLensSmokeTests: XCTestCase {
         tabs.element(boundBy: 0).tap()
     }
 
+    /// Real-UI check of the agent form's Submit state (no server: screenshot fixtures).
+    /// The optional boolean shows a required text field; emptying it must disable Submit
+    /// and typing again must re-enable it. Guards the iOS 18 toolbar update path.
+    func testConditionalFormSubmitFollowsValidity() throws {
+        continueAfterFailure = true
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-onboardingCompleted", "YES",
+            "SCREENSHOT_MODE", "SCREENSHOT_FORM_SHEET", "SCREENSHOT_CONDITIONAL_FORM=optional",
+        ]
+        app.launch()
+
+        let submit = app.navigationBars.buttons["Submit"]
+        XCTAssertTrue(submit.waitForExistence(timeout: 30), "Form sheet did not open")
+        snapshot("form-1-not-answered")
+        XCTAssertTrue(submit.isEnabled, "Optional, unanswered form should be submittable")
+
+        let cases = [("Yes", "Release summary", "Safer agent handoffs"), ("No", "Reason to wait", "Finish verification first")]
+        for (segment, title, defaultText) in cases {
+            app.segmentedControls.buttons[segment].tap()
+            // Matched by placeholder (the field title), which survives editing the value.
+            let field = app.textFields.matching(NSPredicate(format: "placeholderValue == %@", title)).firstMatch
+            XCTAssertTrue(field.waitForExistence(timeout: 5), "\(segment): '\(title)' field missing")
+            guard field.exists else { continue }
+            XCTAssertEqual(field.value as? String, defaultText, "\(segment): default text not prefilled")
+            XCTAssertTrue(submit.isEnabled, "\(segment): defaults are valid, Submit should be enabled")
+
+            field.tap()
+            field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: defaultText.count + 2))
+            wait(for: submit, enabled: false, "\(segment): Submit stayed enabled with an empty required field")
+            snapshot("form-2-\(segment.lowercased())-empty")
+
+            field.typeText("Okay now")
+            wait(for: submit, enabled: true, "\(segment): Submit did not come back after typing")
+        }
+    }
+
+    private func wait(for element: XCUIElement, enabled: Bool, _ message: String) {
+        let expectation = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "isEnabled == %@", NSNumber(value: enabled)), object: element)
+        XCTAssertEqual(XCTWaiter().wait(for: [expectation], timeout: 5), .completed, message)
+    }
+
     /// Opens the given session, optionally sends one prompt through the composer and
     /// waits for the streamed answer to finish (the Stop button goes away).
     private func chatRoundTrip(in app: XCUIApplication, sessionTitle: String, prompt: String?) throws {
