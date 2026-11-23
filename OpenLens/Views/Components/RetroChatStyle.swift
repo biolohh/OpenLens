@@ -202,7 +202,9 @@ struct ChatHeaderStatusChrome: ViewModifier {
                 }
         } else {
             content
-                .compatGlassEffect(in: Capsule())
+                .compatGlassEffect(in: OpenLensDesignSystem.currentTheme.components.flatSurfaces
+                    ? AnyShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    : AnyShape(Capsule()))
         }
     }
 }

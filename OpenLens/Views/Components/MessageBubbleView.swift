@@ -357,13 +357,13 @@ struct MessageBubbleView: View {
     private func toolSegment(_ step: ChatMessage.PersistedToolStep) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(toolTranscriptLine(step))
-                .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 13, weight: .medium))
+                .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12))
                 .foregroundStyle(step.isError ? (isRetroChat ? RetroChatStyle.danger : .orange) : (isRetroChat ? RetroChatStyle.secondaryInk : Color.appSecondary))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let output = step.outputPreview {
                 Text(output)
-                    .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12))
+                    .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 11))
                     .foregroundStyle(isRetroChat ? RetroChatStyle.mutedInk : Color.appSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 2)

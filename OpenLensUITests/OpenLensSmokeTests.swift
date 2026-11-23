@@ -41,10 +41,15 @@ final class OpenLensSmokeTests: XCTestCase {
 
         if let title = environment["OPENLENS_SMOKE_SESSION_TITLE"], !title.isEmpty {
             try chatRoundTrip(in: app, sessionTitle: title, prompt: environment["OPENLENS_SMOKE_PROMPT"])
+            // Back to the tab root: the chat is pushed and hides the tab bar.
+            if !tabBar.isHittable {
+                app.navigationBars.buttons.firstMatch.tap()
+                sleep(2)
+            }
         }
 
         let tabs = tabBar.buttons
-        for index in 1..<tabs.count {
+        for index in 1..<max(tabs.count, 1) {
             tabs.element(boundBy: index).tap()
             sleep(3)
             snapshot(String(format: "%02d-tab-%d", 3 + index, index))
