@@ -129,15 +129,18 @@ struct ChatModeChipChrome: ViewModifier {
                     RetroChatDoubleBorder(cornerRadius: 5, lineWidth: 1.5)
                 }
         } else {
+            let shape = OpenLensDesignSystem.currentTheme.components.flatSurfaces
+                ? AnyShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                : AnyShape(Capsule())
             if usesGlassInStandardMode {
                 content
                     .background(Color.appTertiary)
-                    .clipShape(Capsule())
-                    .compatGlassEffect(in: Capsule())
+                    .clipShape(shape)
+                    .compatGlassEffect(in: shape)
             } else {
                 content
                     .background(Color.appTertiary)
-                    .clipShape(Capsule())
+                    .clipShape(shape)
             }
         }
     }
@@ -151,10 +154,11 @@ struct ChatComposerFieldChrome: ViewModifier {
             content
                 .modifier(RetroChatPanelChrome(fill: RetroChatStyle.paper, cornerRadius: 7))
         } else {
+            let radius = OpenLensDesignSystem.currentTheme.radius.largeCard
             content
-                .compatGlassEffect(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .compatGlassEffect(in: RoundedRectangle(cornerRadius: radius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .stroke(Color.appSeparator.opacity(0.8), lineWidth: 1)
                 }
                 .subtleShadow()
@@ -170,11 +174,12 @@ struct ChatPopoverChrome: ViewModifier {
             content
                 .modifier(RetroChatPanelChrome(fill: RetroChatStyle.paper, cornerRadius: 7, shadowOffset: 4))
         } else {
+            let radius = OpenLensDesignSystem.currentTheme.radius.largeCard
             content
                 .background(Color.appSurface)
-                .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: radius, style: .continuous)
                         .stroke(Color.appSeparator.opacity(0.7), lineWidth: 1)
                 }
         }

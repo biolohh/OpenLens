@@ -40,30 +40,91 @@ struct OpenLensColorTokens {
     let success: OpenLensSemanticColor
     let warning: OpenLensSemanticColor
     let danger: OpenLensSemanticColor
+    /// User chat bubble and its text. `nil` = the user accent (Settings → Appearance).
+    var userBubble: OpenLensSemanticColor? = nil
+    var onUserBubble: OpenLensSemanticColor? = nil
+    /// Send button and its glyph. `nil` = the user accent.
+    var sendAction: OpenLensSemanticColor? = nil
+    var onSendAction: OpenLensSemanticColor? = nil
 }
 
 struct OpenLensTypographyTokens {
-    let sectionLabel = Font.system(size: 12, weight: .semibold, design: .rounded)
-    let rowTitle = Font.system(size: 15, weight: .medium, design: .rounded)
-    let rowSubtitle = Font.system(size: 13)
-    let body = Font.system(size: 15)
+    let sectionLabel: Font
+    let rowTitle: Font
+    let rowSubtitle: Font
+    let body: Font
+    /// Code, tool calls, paths and commands. Falls back to the system monospaced font.
+    let monoFamily: String?
+
+    init(
+        sectionLabel: Font = .system(size: 12, weight: .semibold, design: .rounded),
+        rowTitle: Font = .system(size: 15, weight: .medium, design: .rounded),
+        rowSubtitle: Font = .system(size: 13),
+        body: Font = .system(size: 15),
+        monoFamily: String? = nil
+    ) {
+        self.sectionLabel = sectionLabel
+        self.rowTitle = rowTitle
+        self.rowSubtitle = rowSubtitle
+        self.body = body
+        self.monoFamily = monoFamily
+    }
+
+    /// Monospaced font for code-like text: the theme's bundled family when it is
+    /// registered, otherwise the system monospaced design.
+    func mono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        if let monoFamily, UIFont(name: monoFamily, size: size) != nil {
+            return .custom(monoFamily, size: size).weight(weight)
+        }
+        return .system(size: size, weight: weight, design: .monospaced)
+    }
 }
 
 struct OpenLensSpacingTokens {
-    let xSmall: CGFloat = 4
-    let small: CGFloat = 8
-    let medium: CGFloat = 12
-    let large: CGFloat = 16
-    let xLarge: CGFloat = 20
-    let xxLarge: CGFloat = 24
+    let xSmall: CGFloat
+    let small: CGFloat
+    let medium: CGFloat
+    let large: CGFloat
+    let xLarge: CGFloat
+    let xxLarge: CGFloat
+
+    init(
+        xSmall: CGFloat = 4,
+        small: CGFloat = 8,
+        medium: CGFloat = 12,
+        large: CGFloat = 16,
+        xLarge: CGFloat = 20,
+        xxLarge: CGFloat = 24
+    ) {
+        self.xSmall = xSmall
+        self.small = small
+        self.medium = medium
+        self.large = large
+        self.xLarge = xLarge
+        self.xxLarge = xxLarge
+    }
 }
 
 struct OpenLensRadiusTokens {
-    let control: CGFloat = 14
-    let iconTile: CGFloat = 10
-    let card: CGFloat = 20
-    let largeCard: CGFloat = 24
-    let heroCard: CGFloat = 36
+    let control: CGFloat
+    let iconTile: CGFloat
+    let card: CGFloat
+    let largeCard: CGFloat
+    let heroCard: CGFloat
+
+    init(
+        control: CGFloat = 14,
+        iconTile: CGFloat = 10,
+        card: CGFloat = 20,
+        largeCard: CGFloat = 24,
+        heroCard: CGFloat = 36
+    ) {
+        self.control = control
+        self.iconTile = iconTile
+        self.card = card
+        self.largeCard = largeCard
+        self.heroCard = heroCard
+    }
 }
 
 struct OpenLensShadowStyle {
@@ -97,6 +158,8 @@ struct OpenLensComponentTokens {
     let surfaceInnerBorder: OpenLensStrokeStyle
     let controlBorder: OpenLensStrokeStyle
     let iconTileBorder: OpenLensStrokeStyle
+    /// Flat bordered surfaces instead of materials / Liquid Glass.
+    let flatSurfaces: Bool
 
     init(
         cardPadding: CGFloat = 16,
@@ -106,7 +169,8 @@ struct OpenLensComponentTokens {
         surfaceBorder: OpenLensStrokeStyle = .none,
         surfaceInnerBorder: OpenLensStrokeStyle = .none,
         controlBorder: OpenLensStrokeStyle = .none,
-        iconTileBorder: OpenLensStrokeStyle = .none
+        iconTileBorder: OpenLensStrokeStyle = .none,
+        flatSurfaces: Bool = false
     ) {
         self.cardPadding = cardPadding
         self.rowHorizontalPadding = rowHorizontalPadding
@@ -116,6 +180,7 @@ struct OpenLensComponentTokens {
         self.surfaceInnerBorder = surfaceInnerBorder
         self.controlBorder = controlBorder
         self.iconTileBorder = iconTileBorder
+        self.flatSurfaces = flatSurfaces
     }
 }
 
@@ -132,8 +197,9 @@ struct OpenLensTheme {
 
 enum OpenLensAppearance: String, CaseIterable, Identifiable {
     static let storageKey = "openLensAppearance"
-    static let fallback: OpenLensAppearance = .classic
+    static let fallback: OpenLensAppearance = .opencode
 
+    case opencode
     case classic
     case graphite
     case meadow
@@ -142,6 +208,7 @@ enum OpenLensAppearance: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
+        case .opencode: "OpenCode"
         case .classic: "Classic"
         case .graphite: "Graphite"
         case .meadow: "Meadow"
@@ -150,6 +217,7 @@ enum OpenLensAppearance: String, CaseIterable, Identifiable {
 
     var subtitle: String {
         switch self {
+        case .opencode: "OpenCode grey"
         case .classic: "Warm neutral"
         case .graphite: "Cool graphite"
         case .meadow: "Soft green"
@@ -158,6 +226,7 @@ enum OpenLensAppearance: String, CaseIterable, Identifiable {
 
     var theme: OpenLensTheme {
         switch self {
+        case .opencode: .opencode
         case .classic: .classic
         case .graphite: .graphite
         case .meadow: .meadow
@@ -180,6 +249,54 @@ enum OpenLensAppearance: String, CaseIterable, Identifiable {
 }
 
 extension OpenLensTheme {
+    /// The official OpenCode web/desktop look (`oc-2` theme of anomalyco/opencode):
+    /// neutral greys, small corners, 1 pt borders instead of shadows, JetBrains Mono for code.
+    static let opencode = OpenLensTheme(
+        id: "opencode",
+        name: "OpenCode",
+        colors: OpenLensColorTokens(
+            background: .init(light: .white, dark: .openLens(22, 22, 22)),
+            surface: .init(light: .openLens(248, 248, 248), dark: .openLens(28, 28, 28)),
+            primary: .init(light: .openLens(23, 23, 23), dark: .openLens(237, 237, 237)),
+            secondary: .init(light: .openLens(111, 111, 111), dark: .openLens(160, 160, 160)),
+            tertiary: .init(light: .openLens(243, 243, 243), dark: .openLens(35, 35, 35)),
+            separator: .init(light: .openLens(232, 232, 232), dark: .openLens(40, 40, 40)),
+            accent: .init(light: .openLens(23, 19, 17), dark: .openLens(241, 236, 232)),
+            onAccent: .init(light: .white, dark: .openLens(23, 19, 17)),
+            success: .init(light: .openLens(10, 160, 0), dark: .openLens(18, 201, 5)),
+            warning: .init(light: .openLens(184, 138, 0), dark: .openLens(252, 213, 58)),
+            danger: .init(light: .openLens(220, 60, 40), dark: .openLens(252, 83, 58)),
+            userBubble: .init(light: .openLens(240, 240, 240), dark: .openLens(42, 42, 42)),
+            onUserBubble: .init(light: .openLens(23, 23, 23), dark: .openLens(237, 237, 237)),
+            sendAction: .init(light: .openLens(23, 19, 17), dark: .openLens(241, 236, 232)),
+            onSendAction: .init(light: .white, dark: .openLens(23, 19, 17))
+        ),
+        typography: OpenLensTypographyTokens(
+            sectionLabel: .system(size: 12, weight: .medium),
+            rowTitle: .system(size: 15, weight: .semibold),
+            rowSubtitle: .system(size: 13),
+            body: .system(size: 15),
+            monoFamily: "JetBrainsMono-Regular"
+        ),
+        spacing: OpenLensSpacingTokens(),
+        radius: OpenLensRadiusTokens(control: 8, iconTile: 4, card: 10, largeCard: 10, heroCard: 12),
+        shadow: OpenLensShadowTokens(
+            surface: OpenLensShadowStyle(color: .init(light: .clear), radius: 0, x: 0, y: 0),
+            subtle: OpenLensShadowStyle(color: .init(light: .clear), radius: 0, x: 0, y: 0)
+        ),
+        components: OpenLensComponentTokens(
+            surfaceBorder: OpenLensStrokeStyle(
+                color: .init(light: .openLens(232, 232, 232), dark: .openLens(40, 40, 40)),
+                width: 1
+            ),
+            controlBorder: OpenLensStrokeStyle(
+                color: .init(light: .openLens(219, 219, 219), dark: .openLens(48, 48, 48)),
+                width: 1
+            ),
+            flatSurfaces: true
+        )
+    )
+
     static let classic = OpenLensTheme(
         id: "classic",
         name: "Classic",
@@ -452,6 +569,22 @@ extension Color {
     /// this in `body` refresh automatically when the preference changes.
     static var appUserAccent: Color { AccentColorPreference.shared.color }
     static var appUserOnAccent: Color { AccentColorPreference.shared.onAccentColor }
+    /// User chat bubble: the theme's own bubble color when it defines one, else the user accent.
+    static var appUserBubble: Color {
+        OpenLensDesignSystem.currentTheme.colors.userBubble?.color ?? appUserAccent
+    }
+    static var appOnUserBubble: Color {
+        OpenLensDesignSystem.currentTheme.colors.onUserBubble?.color ?? appUserOnAccent
+    }
+    /// Send button: the theme's action color when it defines one, else the user accent.
+    static var appSendAction: Color {
+        OpenLensDesignSystem.currentTheme.colors.sendAction?.color ?? appUserAccent
+    }
+    static var appOnSendAction: Color {
+        OpenLensDesignSystem.currentTheme.colors.onSendAction?.color ?? appUserOnAccent
+    }
+    /// Hairline border used by flat themes (clear when the theme has none).
+    static var appBorder: Color { OpenLensDesignSystem.currentTheme.components.controlBorder.color.color }
     /// Fixed primary-button colors for the connection flow (onboarding, setup, connect) and the
     /// new-session FAB. Ignore both the theme accent and the user accent: near-black with white
     /// text in light mode, white with black text in dark mode.
@@ -460,6 +593,13 @@ extension Color {
     static var appSuccess: Color { OpenLensDesignSystem.currentTheme.colors.success.color }
     static var appWarning: Color { OpenLensDesignSystem.currentTheme.colors.warning.color }
     static var appDanger: Color { OpenLensDesignSystem.currentTheme.colors.danger.color }
+}
+
+extension Font {
+    /// The active theme's code font (JetBrains Mono in the OpenCode look, SF Mono otherwise).
+    static func openLensMono(size: CGFloat, weight: Font.Weight = .regular) -> Font {
+        OpenLensDesignSystem.currentTheme.typography.mono(size: size, weight: weight)
+    }
 }
 
 // MARK: - Primary Call To Action

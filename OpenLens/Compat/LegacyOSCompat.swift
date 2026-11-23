@@ -20,7 +20,18 @@ extension View {
         interactive: Bool = false,
         in shape: S
     ) -> some View {
-        if #available(iOS 26.0, *) {
+        if OpenLensDesignSystem.currentTheme.components.flatSurfaces {
+            // Flat themes (OpenCode look): solid surface + hairline border on every iOS version.
+            background {
+                ZStack {
+                    shape.fill(Color.appSurface)
+                    if let tint {
+                        shape.fill(tint)
+                    }
+                    shape.stroke(Color.appBorder, lineWidth: 1)
+                }
+            }
+        } else if #available(iOS 26.0, *) {
             glassEffect(LegacyGlass.make(tint: tint, interactive: interactive), in: shape)
         } else {
             background {

@@ -45,7 +45,7 @@ struct AgentActivityCard: View {
                 .textCase(.uppercase)
 
             Text(activity.thinkingText)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.openLensMono(size: 13))
                 .foregroundStyle(Color.appSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -67,12 +67,12 @@ struct AgentActivityCard: View {
     private func stepRow(_ step: ActivityStep) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text("→ \(step.label)")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.openLensMono(size: 13, weight: .medium))
                 .foregroundStyle(Color.appPrimary)
 
             if !step.detail.isEmpty && step.type == .toolCall {
                 Text(step.detail)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.openLensMono(size: 12))
                     .foregroundStyle(Color.appSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }

@@ -131,9 +131,9 @@ struct MessageBubbleView: View {
                 MessageAttachmentsRow(images: message.imageAttachments, files: message.fileAttachments)
             }
             if !message.content.isEmpty || (message.imageAttachments.isEmpty && message.fileAttachments.isEmpty) {
-                SkillMentionText(text: message.content, chipStyle: isRetroChat ? .retro : .standard(.appUserOnAccent))
-                    .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: 16))
-                    .foregroundStyle(isRetroChat ? RetroChatStyle.ink : Color.appUserOnAccent)
+                SkillMentionText(text: message.content, chipStyle: isRetroChat ? .retro : .standard(.appOnUserBubble))
+                    .font(isRetroChat ? RetroChatStyle.bodyFont : theme.typography.body)
+                    .foregroundStyle(isRetroChat ? RetroChatStyle.ink : Color.appOnUserBubble)
                     .padding(.horizontal, isRetroChat ? 14 : 16)
                     .padding(.vertical, isRetroChat ? 10 : 11)
                     .background {
@@ -142,7 +142,7 @@ struct MessageBubbleView: View {
                                 .fill(RetroChatStyle.playerFill)
                                 .shadow(color: RetroChatStyle.shadow, radius: 0, x: 3, y: 3)
                         } else {
-                            bubbleFill(Color.appUserAccent)
+                            bubbleFill(Color.appUserBubble)
                         }
                     }
                     .overlay {
@@ -309,13 +309,13 @@ struct MessageBubbleView: View {
             if let projection, message.isStreaming {
                 StreamingAssistantTextView(
                     projection: projection,
-                    font: isRetroChat ? RetroChatStyle.smallFont : .system(size: 12, design: .monospaced),
+                    font: isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12),
                     color: isRetroChat ? RetroChatStyle.mutedInk : Color.appSecondary
                 )
             } else {
                 DeferredReasoningTextView(
                     text: text,
-                    font: isRetroChat ? RetroChatStyle.smallFont : .system(size: 12, design: .monospaced),
+                    font: isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12),
                     color: isRetroChat ? RetroChatStyle.mutedInk : Color.appSecondary,
                     usesRetroTypography: isRetroChat
                 )
@@ -357,13 +357,13 @@ struct MessageBubbleView: View {
     private func toolSegment(_ step: ChatMessage.PersistedToolStep) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(toolTranscriptLine(step))
-                .font(isRetroChat ? RetroChatStyle.smallFont : .system(size: 13, weight: .medium, design: .monospaced))
+                .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 13, weight: .medium))
                 .foregroundStyle(step.isError ? (isRetroChat ? RetroChatStyle.danger : .orange) : (isRetroChat ? RetroChatStyle.secondaryInk : Color.appSecondary))
                 .fixedSize(horizontal: false, vertical: true)
 
             if let output = step.outputPreview {
                 Text(output)
-                    .font(isRetroChat ? RetroChatStyle.smallFont : .system(size: 12, design: .monospaced))
+                    .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12))
                     .foregroundStyle(isRetroChat ? RetroChatStyle.mutedInk : Color.appSecondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, 2)
@@ -375,7 +375,7 @@ struct MessageBubbleView: View {
                         .font(isRetroChat ? RetroChatStyle.smallFont : .system(size: 11, weight: .semibold))
                         .foregroundStyle(isRetroChat ? RetroChatStyle.secondaryInk : Color.appSecondary)
                     Text(partial)
-                        .font(isRetroChat ? RetroChatStyle.smallFont : .system(size: 12, design: .monospaced))
+                        .font(isRetroChat ? RetroChatStyle.smallFont : .openLensMono(size: 12))
                         .foregroundStyle(isRetroChat ? RetroChatStyle.mutedInk : Color.appSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }

@@ -10,7 +10,7 @@ struct FileChangeRow: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 Text(file.path)
-                    .font(.system(size: 14, weight: .medium, design: .monospaced))
+                    .font(.openLensMono(size: 14, weight: .medium))
                     .foregroundStyle(Color.appPrimary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -138,7 +138,7 @@ struct FileDiffDetailView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 12) {
                     Text(file.path)
-                        .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        .font(.openLensMono(size: 14, weight: .medium))
                         .foregroundStyle(Color.appPrimary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -279,12 +279,12 @@ private struct CodeListingView: View {
                     let line = lines[index]
                     HStack(alignment: .top, spacing: 12) {
                         Text("\(index + 1)")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.openLensMono(size: 11))
                             .foregroundStyle(Color.appSecondary)
                             .frame(width: 36, alignment: .trailing)
 
                         Text(line.isEmpty ? " " : line)
-                            .font(.system(size: CodeFont.size, design: .monospaced))
+                            .font(.openLensMono(size: CodeFont.size))
                             .foregroundStyle(Color.appPrimary)
                             .textSelection(.enabled)
                             .unwrappedCodeLine(minWidth: codeWidth)
@@ -346,7 +346,7 @@ struct UnifiedDiffView: View {
                     SurfaceCard(padding: 0) {
                         VStack(alignment: .leading, spacing: 0) {
                             Text(hunk.header)
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .font(.openLensMono(size: 12, weight: .semibold))
                                 .foregroundStyle(Color.appSecondary)
                                 .padding(.horizontal, 16)
                                 .padding(.vertical, 12)
@@ -379,22 +379,22 @@ private struct UnifiedDiffLineRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Text(line.prefix)
-                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                .font(.openLensMono(size: 12, weight: .bold))
                 .foregroundStyle(prefixColor)
                 .frame(width: 12)
 
             Text(line.oldLineNumber.map(String.init) ?? "")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.openLensMono(size: 11))
                 .foregroundStyle(Color.appSecondary)
                 .frame(width: 38, alignment: .trailing)
 
             Text(line.newLineNumber.map(String.init) ?? "")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.openLensMono(size: 11))
                 .foregroundStyle(Color.appSecondary)
                 .frame(width: 38, alignment: .trailing)
 
             Text(line.text.isEmpty ? " " : line.text)
-                .font(.system(size: CodeFont.size, design: .monospaced))
+                .font(.openLensMono(size: CodeFont.size))
                 .foregroundStyle(Color.appPrimary)
                 .textSelection(.enabled)
                 .unwrappedCodeLine(minWidth: codeWidth)

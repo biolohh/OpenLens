@@ -1002,11 +1002,11 @@ struct ChatView: View {
         if chatClient.isQueueingPrompt {
             ZStack {
                 Circle()
-                    .fill(isRetroChat ? RetroChatStyle.ink : Color.appUserAccent)
+                    .fill(isRetroChat ? RetroChatStyle.ink : Color.appSendAction)
 
                 ProgressView()
                     .controlSize(.small)
-                    .tint(isRetroChat ? RetroChatStyle.paper : Color.appUserOnAccent)
+                    .tint(isRetroChat ? RetroChatStyle.paper : Color.appOnSendAction)
             }
             .frame(width: 32, height: 32)
             .contentShape(Circle())
@@ -1029,13 +1029,25 @@ struct ChatView: View {
             .frame(width: 32, height: 32)
             .contentShape(Circle())
             .transition(.scale(scale: 0.7).combined(with: .opacity))
+        } else if !isRetroChat && OpenLensDesignSystem.currentTheme.components.flatSurfaces {
+            // OpenCode look: small rounded-square send button in the ink color.
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.appSendAction)
+                Image(systemName: chatClient.isLoading ? "arrow.uturn.up" : "arrow.up")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Color.appOnSendAction)
+            }
+            .frame(width: 30, height: 30)
+            .contentShape(Rectangle())
+            .transition(.scale(scale: 0.7).combined(with: .opacity))
         } else {
             Image(systemName: chatClient.isLoading ? "arrow.uturn.up.circle.fill" : "arrow.up.circle.fill")
                 .font(.system(size: isRetroChat ? 28 : 30, weight: isRetroChat ? .bold : .regular))
                 .symbolRenderingMode(.palette)
                 .foregroundStyle(
-                    isRetroChat ? RetroChatStyle.paper : Color.appUserOnAccent,
-                    isRetroChat ? RetroChatStyle.ink : Color.appUserAccent
+                    isRetroChat ? RetroChatStyle.paper : Color.appOnSendAction,
+                    isRetroChat ? RetroChatStyle.ink : Color.appSendAction
                 )
                 .frame(width: 32, height: 32)
                 .contentShape(Circle())

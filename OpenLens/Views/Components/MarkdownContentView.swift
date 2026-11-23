@@ -674,7 +674,7 @@ private struct MarkdownCodeBlockView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(chunks.prefix(shownChunkCount).enumerated()), id: \.offset) { _, chunk in
                         Text(chunk)
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.openLensMono(size: 13))
                             .foregroundStyle(foregroundColor)
                             .fixedSize(horizontal: true, vertical: true)
                     }

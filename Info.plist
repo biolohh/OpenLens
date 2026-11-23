@@ -24,6 +24,8 @@
 	<key>UIAppFonts</key>
 	<array>
 		<string>Pokemon Classic.ttf</string>
+		<string>JetBrainsMono-Regular.ttf</string>
+		<string>JetBrainsMono-Bold.ttf</string>
 	</array>
 	<key>NSAppTransportSecurity</key>
 	<dict>
