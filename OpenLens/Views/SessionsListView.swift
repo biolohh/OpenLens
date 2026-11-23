@@ -223,7 +223,9 @@ struct SessionsListView: View {
                 .foregroundStyle(Color.appOnNeutralAction)
         }
         .compatGlassProminentButtonStyle()
-        .buttonBorderShape(.circle)
+        .buttonBorderShape(OpenLensDesignSystem.currentTheme.components.flatSurfaces
+            ? .roundedRectangle(radius: OpenLensDesignSystem.currentTheme.radius.card)
+            : .circle)
         .controlSize(.large)
         .tint(Color.appNeutralAction)
         .accessibilityLabel(AppText.newSession)
@@ -1077,14 +1079,16 @@ private struct ConnectedHostCapsule: View {
                 .fill(isReconnecting ? Color.appWarning : Color.appSuccess)
                 .frame(width: 7, height: 7)
             Text(host)
-                .font(.subheadline.weight(.medium).monospaced())
+                .font(.openLensMono(size: 14, weight: .medium))
                 .foregroundStyle(Color.appPrimary)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .compatGlassEffect(in: Capsule())
+        .compatGlassEffect(in: OpenLensDesignSystem.currentTheme.components.flatSurfaces
+            ? AnyShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            : AnyShape(Capsule()))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(AppText.sessions), \(host)")
     }
