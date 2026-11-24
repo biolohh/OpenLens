@@ -293,7 +293,9 @@ struct OCFileToolLine<Fallback: View>: View {
         Group {
             if let files, !files.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(files) { file in OCFileCard(file: file) }
+                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
+                        OCFileCard(file: file, stateID: "\(part.id)/\(index)")
+                    }
                 }
             } else {
                 fallback()
@@ -310,11 +312,24 @@ struct OCFileToolLine<Fallback: View>: View {
 
 /// Bordered card: file icon, directory muted + bold name, +N -N, chevron; opens the diff inline
 /// in a bounded scroll box.
+/// Which file cards are open, kept outside the views: the lazy transcript recycles rows, which
+/// would otherwise reset a card's own state.
+@MainActor @Observable
+final class OCFileCardStore {
+    static let shared = OCFileCardStore()
+    private(set) var open: Set<String> = []
+
+    func toggle(_ id: String) {
+        if open.contains(id) { open.remove(id) } else { open.insert(id) }
+    }
+}
+
 struct OCFileCard: View {
     let file: ReviewFileChange
+    let stateID: String
 
     @Environment(\.ocSessionDirectory) private var directory
-    @State private var open = false
+    private var open: Bool { OCFileCardStore.shared.open.contains(stateID) }
     @State private var showsAll = false
     @State private var lineCount = 0
 
@@ -326,7 +341,7 @@ struct OCFileCard: View {
         let path = OCFileSupport.relative(file.path, to: directory)
         VStack(spacing: 0) {
             Button {
-                open.toggle()
+                OCFileCardStore.shared.toggle(stateID)
             } label: {
                 HStack(spacing: 8) {
                     OCFileTypeIcon(name: OCFileSupport.split(path: path).name)
