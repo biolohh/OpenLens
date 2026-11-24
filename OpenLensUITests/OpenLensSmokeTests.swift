@@ -219,7 +219,6 @@ final class OpenLensSmokeTests: XCTestCase {
                 line.tap()
                 sleep(1)
                 snapshot("03-chat-tool-line-open")
-                line.tap()
             }
             snapshot("03-chat-used-expanded")
             used.tap()
