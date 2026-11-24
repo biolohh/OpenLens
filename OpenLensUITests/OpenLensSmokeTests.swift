@@ -258,7 +258,13 @@ final class OpenLensSmokeTests: XCTestCase {
         let row = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", sessionTitle))
             .firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 15), "Session '\(sessionTitle)' is not listed")
+        // New sessions push older ones below the fold of the lazy list: scroll until it is realized.
+        var scrolls = 0
+        while !row.waitForExistence(timeout: 3), scrolls < 12 {
+            app.swipeUp()
+            scrolls += 1
+        }
+        XCTAssertTrue(row.exists, "Session '\(sessionTitle)' is not listed")
         guard row.exists else { return }
         row.tap()
         sleep(3)
