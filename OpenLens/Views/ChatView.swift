@@ -195,13 +195,15 @@ struct ChatView: View {
             attachmentSource = nil
             availableSlashActions = []
             availableSkills = []
+            composerAgents = []
             skillCatalogFailure = nil
             chatClient.updateSlashCatalog(commands: [], agents: [])
             chatClient.updateSkillCatalog([])
             guard chatClient.sessionLocationState == .ready else { return }
-            await loadCommands(force: true)
-            await loadSkills(force: true)
-            if ocShell != nil { composerAgents = await workspaceService.loadSelectableAgents() }
+            // Commands (with the agents they share a request with) and skills load side by side.
+            async let commandsLoad: Void = loadCommands(force: true)
+            async let skillsLoad: Void = loadSkills(force: true)
+            _ = await (commandsLoad, skillsLoad)
         }
         // Watch completion/visibility inputs, not the viewed marker this
         // acknowledgement writes. The service merges confirmed markers into
@@ -654,7 +656,8 @@ struct ChatView: View {
     @ViewBuilder
     private var ocComposerChipsRow: some View {
         let hasContext = chatClient.contextUsageSummary != nil
-        if !chatClient.todos.isEmpty || hasContext {
+        let offersContext = hasContext || chatClient.showsActiveContext || ScreenshotFixtures.showsActiveContextButton
+        if !chatClient.todos.isEmpty || offersContext {
             HStack(spacing: 6) {
                 if !chatClient.todos.isEmpty { todoChip }
                 Spacer(minLength: 0)
@@ -668,6 +671,25 @@ struct ChatView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("context-usage")
+                } else {
+                    // No usage yet: the active-context sheet stays reachable (as on the classic row).
+                    Button {
+                        showContextStatus = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.bubble")
+                                .font(.system(size: 11, weight: .medium))
+                            Text("Context")
+                                .font(.system(size: 12))
+                        }
+                        .foregroundStyle(Color.appSecondary)
+                        .padding(.horizontal, 8)
+                        .frame(height: 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Inspect active context")
+                    .accessibilityIdentifier("inspect-active-context")
                 }
             }
             .padding(.horizontal, 4)
@@ -756,28 +778,38 @@ struct ChatView: View {
 
     // MARK: - Input Bar
 
+    @ViewBuilder
+    private var composerPickers: some View {
+        if showsCommandPicker {
+            slashCommandPicker
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("oc.slashPicker")
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if showsSkillPicker || showsOCFileMention {
+            SkillMentionPicker(
+                skills: filteredSkills,
+                visualMode: visualMode,
+                onSelect: applySkillMention,
+                onAttachFile: mentionFileAction
+            )
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("oc.mentionPicker")
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        } else if let skillCatalogFailure, showsSkillCatalogFailure {
+            SkillCatalogFailureRow(
+                message: skillCatalogFailure,
+                isRetrying: isLoadingSkills,
+                visualMode: visualMode
+            ) {
+                Task { await loadSkills(force: true) }
+            }
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
     private var inputBar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if showsCommandPicker {
-                slashCommandPicker
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if showsSkillPicker {
-                SkillMentionPicker(
-                    skills: filteredSkills,
-                    visualMode: visualMode,
-                    onSelect: applySkillMention
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            } else if let skillCatalogFailure, showsSkillCatalogFailure {
-                SkillCatalogFailureRow(
-                    message: skillCatalogFailure,
-                    isRetrying: isLoadingSkills,
-                    visualMode: visualMode
-                ) {
-                    Task { await loadSkills(force: true) }
-                }
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
+            composerPickers
 
             if !chatClient.composerAttachments.isEmpty || chatClient.isPreparingComposerImage {
                 ComposerAttachmentStrip(
@@ -792,7 +824,7 @@ struct ChatView: View {
             if ocShell != nil {
                 OCComposerCard(
                     chatClient: chatClient,
-                    agents: composerAgents,
+                    agents: chatClient.canSwitchSessionAgent ? composerAgents : [],
                     showsAttach: chatClient.canAttachFiles,
                     openModelPicker: { showModelPicker = true },
                     field: { composerTokenLayout },
@@ -1444,6 +1476,23 @@ struct ChatView: View {
         chatClient.currentSession != nil && !filteredSkills.isEmpty
     }
 
+    /// OC composer: an active `@` always offers the repository files (the web's @ context), even
+    /// when the server lists no skills.
+    private var showsOCFileMention: Bool {
+        ocShell != nil && chatClient.currentSession != nil && skillMentionQuery != nil
+            && chatClient.sessionDirectory != nil && chatClient.canAttachFiles
+    }
+
+    private var mentionFileAction: (() -> Void)? {
+        guard showsOCFileMention else { return nil }
+        return { attachRepositoryFileFromMention() }
+    }
+
+    private func attachRepositoryFileFromMention() {
+        chatClient.inputText = SkillMention.removingActiveQuery(from: chatClient.inputText)
+        attachmentSource = .repository
+    }
+
     private var showsSkillCatalogFailure: Bool {
         chatClient.currentSession != nil && skillMentionQuery != nil && skillCatalogFailure != nil
     }
@@ -1458,8 +1507,10 @@ struct ChatView: View {
 
         isLoadingCommands = true
         defer { if commandLoadToken == token { isLoadingCommands = false } }
-        let workspaceSlashActions = await workspaceService.loadSlashActions()
+        let catalog = await workspaceService.loadSlashCatalog()
+        let workspaceSlashActions = catalog.actions
         guard !Task.isCancelled, context == catalogContextID, commandLoadToken == token else { return }
+        if ocShell != nil { composerAgents = catalog.selectableAgents }
         let slashActions = [Self.undoSlashAction] + workspaceSlashActions
         availableSlashActions = slashActions
         chatClient.updateSlashCatalog(
@@ -2328,10 +2379,32 @@ private struct SkillMentionPicker: View {
     let skills: [WorkspaceSkillItem]
     let visualMode: ChatVisualMode
     let onSelect: (WorkspaceSkillItem) -> Void
+    /// OC composer only: a leading "Repository File" row that opens the repository file picker.
+    var onAttachFile: (() -> Void)?
 
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
+                if let onAttachFile {
+                    Button(action: onAttachFile) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "chevron.left.forwardslash.chevron.right")
+                                .font(.system(size: 15, weight: .semibold))
+                                .frame(width: 22)
+                            Text(AppText.attachRepositoryFile)
+                                .font(.system(size: 15, weight: .semibold))
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(primaryTextColor)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 14)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(AppText.attachRepositoryFile)
+                    .accessibilityIdentifier("oc.mention.file")
+                    if !skills.isEmpty { Divider().padding(.leading, 50) }
+                }
                 ForEach(Array(skills.enumerated()), id: \.element.id) { index, skill in
                     Button {
                         onSelect(skill)
