@@ -14,6 +14,8 @@ struct OCNavigationSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+              VStack(alignment: .leading, spacing: 0) {
             ForEach(openedSessions) { session in
                 HStack(spacing: 0) {
                     Button { onOpenSession(session) } label: {
@@ -40,6 +42,10 @@ struct OCNavigationSheet: View {
                     .accessibilityLabel(AppText.ocCloseTab)
                 }
             }
+              }
+            }
+            .frame(maxHeight: 220)
+            .fixedSize(horizontal: false, vertical: openedSessions.count <= 4)
             if !openedSessions.isEmpty {
                 Divider().padding(.vertical, 6)
             }
@@ -69,8 +75,8 @@ struct OCNavigationSheet: View {
         .padding(.horizontal, 12)
         .padding(.top, 20)
         .padding(.bottom, 12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .presentationDetents([.height(CGFloat(openedSessions.isEmpty ? 0 : openedSessions.count * 44 + 13) + CGFloat(Self.destinations.count * 36) + 56)])
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .presentationDetents([.medium, .large])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.appBackground)
     }

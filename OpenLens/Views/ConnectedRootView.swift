@@ -14,8 +14,11 @@ struct ConnectedRootView: View {
 
     @Environment(AppRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.sessionsService) private var sessionsService
     @State private var permissionSheetDetent = PermissionRequestSheet.defaultPresentationDetent
     @State private var showNavigationSheet = false
+    /// Destinations visited so far stay mounted (hidden) so their state survives switching.
+    @State private var mountedTabs: Set<AppTab> = [.chat]
     /// Sessions opened during this run (the web's open "tabs"); shown in the menu sheet.
     @State private var openedSessions: [OCSession] = []
 
@@ -67,12 +70,21 @@ struct ConnectedRootView: View {
     /// destinations replace it and are reached from the Home header menu (web "Tabs" sheet).
     private var compactRoot: some View {
         ZStack {
-            tabNavigationView(for: .chat)
-                .opacity(router.selectedTab == .chat ? 1 : 0)
-                .allowsHitTesting(router.selectedTab == .chat)
-                .accessibilityHidden(router.selectedTab != .chat)
-            if router.selectedTab != .chat {
-                tabNavigationView(for: router.selectedTab)
+            ForEach(AppTab.allCases) { tab in
+                if mountedTabs.contains(tab) || router.selectedTab == tab {
+                    tabNavigationView(for: tab)
+                        .opacity(router.selectedTab == tab ? 1 : 0)
+                        .allowsHitTesting(router.selectedTab == tab)
+                        .accessibilityHidden(router.selectedTab != tab)
+                }
+            }
+        }
+        .onChange(of: router.selectedTab, initial: true) { _, tab in mountedTabs.insert(tab) }
+        // Any route (menu, deep link, Live Activity, Shortcut) that selects a chat session opens a "tab".
+        .onChange(of: router.chatPath, initial: true) { _, _ in
+            if let id = router.selectedChatSessionID, let first = router.chatPath.first,
+               case .chatSession(let session) = first {
+                trackOpened(session, id: id)
             }
         }
         .sheet(isPresented: $showNavigationSheet) {
@@ -86,11 +98,19 @@ struct ConnectedRootView: View {
                 },
                 onOpenSession: { session in
                     showNavigationSheet = false
-                    router.selectChatSession(session)
+                    // Reopen with the current server copy, not the stored snapshot.
+                    Task {
+                        let fresh = (try? await sessionsService.getSession(id: session.id)) ?? session
+                        if let index = openedSessions.firstIndex(where: { $0.id == fresh.id }) {
+                            openedSessions[index] = fresh
+                        }
+                        router.selectChatSession(fresh)
+                    }
                 },
                 onCloseSession: { session in
                     openedSessions.removeAll { $0.id == session.id }
                     router.clearChatSession(ifMatching: session.id)
+                    chatClient.unloadSession(ifMatching: session.id)
                     if openedSessions.isEmpty { showNavigationSheet = false }
                 }
             )
@@ -142,6 +162,7 @@ struct ConnectedRootView: View {
             OCHomeView(
                 initialState: initialSessions,
                 openCount: openedSessions.count,
+                isChatOpen: !router.chatPath.isEmpty,
                 onSelect: selectChatSession,
                 onDelete: handleDeletedSession,
                 newSessionModel: { await chatClient.newSessionModelPreference() },
@@ -169,8 +190,11 @@ struct ConnectedRootView: View {
         }
     }
 
+    private func trackOpened(_ session: OCSession, id: String) {
+        if !openedSessions.contains(where: { $0.id == id }) { openedSessions.append(session) }
+    }
+
     private func selectChatSession(_ session: OCSession) {
-        if !openedSessions.contains(where: { $0.id == session.id }) { openedSessions.append(session) }
         router.selectChatSession(session)
     }
 

@@ -53,23 +53,42 @@ final class OpenLensSmokeTests: XCTestCase {
 
         // Project picker and search, as on the web home.
         let picker = app.buttons["oc.projectPicker"]
-        if picker.waitForExistence(timeout: 5) {
-            picker.tap()
-            sleep(1)
-            snapshot("02b-project-picker")
-            let all = app.buttons["oc.project.all"]
-            if all.exists { all.tap() } else { picker.tap() }
-        }
+        XCTAssertTrue(picker.waitForExistence(timeout: 10), "Project picker missing")
+        picker.tap()
+        sleep(1)
+        snapshot("02b-project-picker")
+        let all = app.buttons["oc.project.all"]
+        XCTAssertTrue(all.waitForExistence(timeout: 5), "'All projects' row missing")
+        all.tap()
+
         let search = app.textFields["oc.search"]
-        if search.waitForExistence(timeout: 5) {
-            search.tap()
-            search.typeText("a")
-            sleep(1)
-            snapshot("02c-search")
-            if let clear = app.buttons.matching(NSPredicate(format: "label == %@", "Dismiss")).allElementsBoundByIndex.last,
-               clear.exists { clear.tap() }
-            app.swipeDown()
-        }
+        XCTAssertTrue(search.waitForExistence(timeout: 5), "Search field missing")
+        search.tap()
+        search.typeText("a")
+        sleep(1)
+        snapshot("02c-search")
+        let resultsHeader = app.staticTexts["Sessions"]
+        XCTAssertTrue(resultsHeader.waitForExistence(timeout: 5), "Search results panel missing")
+        // Typing a nonsense query must yield the empty result state.
+        search.typeText("zzqxj")
+        XCTAssertTrue(app.staticTexts["No results"].waitForExistence(timeout: 5), "Nonsense query still shows results")
+        let clear = app.buttons["Dismiss"]
+        XCTAssertTrue(clear.waitForExistence(timeout: 5), "Search clear button missing")
+        clear.tap()
+        XCTAssertFalse(app.staticTexts["No results"].exists, "Results panel did not close after clearing")
+        app.swipeDown()
+
+        // New session opens the existing new-session flow; dismiss without creating anything.
+        let newSession = app.buttons["oc.newSession"]
+        XCTAssertTrue(newSession.waitForExistence(timeout: 5), "New session button missing")
+        newSession.tap()
+        let sheetTitle = app.navigationBars["New Session"]
+        XCTAssertTrue(sheetTitle.waitForExistence(timeout: 10), "New session sheet did not open")
+        snapshot("02d-new-session-sheet")
+        let dismiss = app.buttons["Dismiss"]
+        XCTAssertTrue(dismiss.waitForExistence(timeout: 5), "Sheet has no dismiss button")
+        dismiss.tap()
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "Home did not come back after dismissing the sheet")
 
         // Every former tab screen is reachable from the header menu.
         let destinations: [(id: String, shot: String)] = [

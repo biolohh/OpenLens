@@ -56,6 +56,14 @@ enum OCHomeGrouping {
         return "unknown"
     }
 
+    /// The web home shows at most 64 rows (home/sessions/index.ts HOME_SESSION_LIMIT).
+    static let rowLimit = 64
+
+    /// Case- and diacritic-insensitive title match.
+    static func matches(_ session: OCSession, query: String) -> Bool {
+        session.title.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
     static func monogram(_ name: String) -> String {
         name.first.map { String($0).uppercased() } ?? "?"
     }
@@ -74,9 +82,14 @@ struct OCHomeView: View {
     }
 
     @Environment(\.sessionsService) private var sessionsService
+    @Environment(\.connection) private var connection
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
 
     @State private var sessions: [OCSession]
+    @State private var statuses: [String: OCSessionStatus] = [:]
+    /// Bumped on every catalog change so a slower in-flight load cannot overwrite it.
+    @State private var generation = 0
     @State private var loadError: String?
     @State private var isLoading = false
     @State private var selectedProjectKey: String?
@@ -87,6 +100,8 @@ struct OCHomeView: View {
     @FocusState private var searchFocused: Bool
 
     let openCount: Int
+    /// True while a chat is pushed on top of the home; reload when it closes.
+    let isChatOpen: Bool
     let onSelect: (OCSession) -> Void
     let onDelete: (OCSession) -> Void
     let newSessionModel: @MainActor () async -> OCV2ModelRef?
@@ -95,12 +110,14 @@ struct OCHomeView: View {
     init(
         initialState: SessionsListView.InitialState,
         openCount: Int,
+        isChatOpen: Bool,
         onSelect: @escaping (OCSession) -> Void,
         onDelete: @escaping (OCSession) -> Void,
         newSessionModel: @escaping @MainActor () async -> OCV2ModelRef?,
         onOpenMenu: @escaping () -> Void
     ) {
         self.openCount = openCount
+        self.isChatOpen = isChatOpen
         self.onSelect = onSelect
         self.onDelete = onDelete
         self.newSessionModel = newSessionModel
@@ -117,50 +134,53 @@ struct OCHomeView: View {
 
     // MARK: Derived
 
-    private var rootSessions: [OCSession] { sessions.filter { $0.parentID == nil } }
-
-    private var projects: [ProjectOption] {
-        var seen = Set<String>()
-        var result: [ProjectOption] = []
-        for s in rootSessions {
-            let key = OCHomeGrouping.projectKey(for: s)
-            if seen.insert(key).inserted {
-                result.append(ProjectOption(key: key, name: OCHomeGrouping.projectName(for: s)))
-            }
-        }
-        return result.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    /// Everything the body needs, computed once per render.
+    private struct Model {
+        var projects: [ProjectOption]
+        var groups: [OCHomeGroup]
+        var results: [OCSession]
     }
 
-    private var scopedSessions: [OCSession] {
-        guard let key = selectedProjectKey else { return rootSessions }
-        return rootSessions.filter { OCHomeGrouping.projectKey(for: $0) == key }
+    private func makeModel() -> Model {
+        let roots = sessions.filter { $0.parentID == nil }
+        var seen = Set<String>()
+        var projects: [ProjectOption] = []
+        for s in roots {
+            let key = OCHomeGrouping.projectKey(for: s)
+            if seen.insert(key).inserted {
+                projects.append(ProjectOption(key: key, name: OCHomeGrouping.projectName(for: s)))
+            }
+        }
+        projects.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let scoped = selectedProjectKey.map { key in roots.filter { OCHomeGrouping.projectKey(for: $0) == key } } ?? roots
+        let ordered = OCHomeGrouping.groups(for: scoped)
+        // Row cap: the first 64 rows in group order.
+        var budget = OCHomeGrouping.rowLimit
+        let capped: [OCHomeGroup] = ordered.compactMap { group in
+            guard budget > 0 else { return nil }
+            let rows = Array(group.sessions.prefix(budget))
+            budget -= rows.count
+            return OCHomeGroup(kind: group.kind, title: group.title, sessions: rows)
+        }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let results = q.isEmpty ? [] : ordered.flatMap(\.sessions).filter { OCHomeGrouping.matches($0, query: q) }
+        return Model(projects: projects, groups: capped, results: results)
     }
 
     private var trimmedQuery: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-    private var searchResults: [OCSession] {
-        let q = trimmedQuery
-        guard !q.isEmpty else { return [] }
-        return OCHomeGrouping.groups(for: scopedSessions).flatMap(\.sessions).filter {
-            $0.title.localizedCaseInsensitiveContains(q)
-        }
-    }
-
-    private var groups: [OCHomeGroup] { OCHomeGrouping.groups(for: scopedSessions) }
-
-    private var selectedProjectName: String {
-        projects.first { $0.key == selectedProjectKey }?.name ?? AppText.ocAllProjects
-    }
-
-    /// The web page sits on a grey ground with a white bordered panel; dark is near black.
-    private var pageBackground: Color { colorScheme == .dark ? .black : Color.appSurface }
+    /// Page ground and panel from the theme tokens: light = grey page, white panel;
+    /// dark = base page, raised panel.
+    private var pageBackground: Color { colorScheme == .dark ? Color.appBackground : Color.appTertiary }
+    private var panelBackground: Color { colorScheme == .dark ? Color.appSurface : Color.appBackground }
 
     // MARK: Body
 
     var body: some View {
-        VStack(spacing: 0) {
+        let model = makeModel()
+        return VStack(spacing: 0) {
             header
-            panel
+            panel(model)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 4)
         }
@@ -175,6 +195,7 @@ struct OCHomeView: View {
         }
         .sheet(item: $newSessionRequest) { _ in
             NewSessionSheet(newSessionModel: newSessionModel) { session in
+                generation &+= 1
                 sessions.insert(session, at: 0)
                 onSelect(session)
             }
@@ -192,7 +213,21 @@ struct OCHomeView: View {
         } message: { _ in
             Text(AppText.deleteSessionMessage)
         }
-        .task { await load(silent: true) }
+        // Silent reload + status polling whenever the app is active.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await load(silent: true)
+            await pollStatuses()
+        }
+        .onChange(of: isChatOpen) { _, open in
+            if !open { Task { await load(silent: true) } }
+        }
+        // A project that disappears from the catalog must not leave an empty filtered list.
+        .onChange(of: sessions) { _, _ in
+            if let key = selectedProjectKey, !makeModel().projects.contains(where: { $0.key == key }) {
+                selectedProjectKey = nil
+            }
+        }
     }
 
     // MARK: Header
@@ -206,6 +241,13 @@ struct OCHomeView: View {
                 Text(AppText.ocHome)
                     .font(.system(size: 13, weight: .semibold))
                 Spacer(minLength: 0)
+                if connection.isReconnecting {
+                    Circle()
+                        .fill(Color.appWarning)
+                        .frame(width: 7, height: 7)
+                        .accessibilityIdentifier("oc.reconnecting")
+                        .accessibilityLabel(AppText.ocReconnecting)
+                }
                 if openCount > 0 {
                     Text("\(openCount)")
                         .font(.system(size: 13))
@@ -225,12 +267,12 @@ struct OCHomeView: View {
 
     // MARK: Panel
 
-    private var panel: some View {
+    private func panel(_ model: Model) -> some View {
         ZStack(alignment: .top) {
             VStack(spacing: 8) {
-                projectButton
+                projectButton(model)
                 searchField
-                content
+                content(model)
             }
             .padding(.horizontal, 12)
             .padding(.top, 12)
@@ -239,17 +281,17 @@ struct OCHomeView: View {
                 Color.clear
                     .contentShape(Rectangle())
                     .onTapGesture { showProjectPicker = false }
-                projectPopover
+                projectPopover(model)
                     .padding(.horizontal, 12)
                     .padding(.top, 12 + 40 + 6)
             } else if !trimmedQuery.isEmpty {
-                resultsPanel
+                resultsPanel(model)
                     .padding(.horizontal, 12)
                     .padding(.top, 12 + 40 + 8 + 36 + 4)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(panelBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.appSeparator, lineWidth: 1)
@@ -257,7 +299,7 @@ struct OCHomeView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    private var projectButton: some View {
+    private func projectButton(_ model: Model) -> some View {
         Button {
             searchFocused = false
             showProjectPicker.toggle()
@@ -266,7 +308,7 @@ struct OCHomeView: View {
                 Image(systemName: "folder")
                     .font(.system(size: 14))
                     .frame(width: 18)
-                Text(selectedProjectName)
+                Text(selectedProjectName(model))
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -282,27 +324,36 @@ struct OCHomeView: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("oc.projectPicker")
-        .accessibilityLabel(selectedProjectName)
+        .accessibilityLabel(selectedProjectName(model))
     }
 
-    private var projectPopover: some View {
+    private func selectedProjectName(_ model: Model) -> String {
+        model.projects.first { $0.key == selectedProjectKey }?.name ?? AppText.ocAllProjects
+    }
+
+    private func projectPopover(_ model: Model) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             popoverRow(
                 icon: "folder", title: AppText.ocAllProjects,
                 selected: selectedProjectKey == nil, id: "oc.project.all"
             ) { selectProject(nil) }
-            ForEach(projects) { project in
-                popoverRow(
-                    monogram: OCHomeGrouping.monogram(project.name), title: project.name,
-                    selected: selectedProjectKey == project.key, id: "oc.project.\(project.name)"
-                ) { selectProject(project.key) }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(model.projects) { project in
+                        popoverRow(
+                            monogram: OCHomeGrouping.monogram(project.name), title: project.name,
+                            selected: selectedProjectKey == project.key, id: "oc.project.\(project.key)"
+                        ) { selectProject(project.key) }
+                    }
+                }
             }
+            .frame(maxHeight: 280)
         }
         .padding(6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .surfaceShadow()
     }
 
     private func popoverRow(
@@ -366,7 +417,7 @@ struct OCHomeView: View {
         .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private var resultsPanel: some View {
+    private func resultsPanel(_ model: Model) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(AppText.ocSessionsResults)
                 .font(.system(size: 13))
@@ -374,7 +425,7 @@ struct OCHomeView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 10)
                 .padding(.bottom, 6)
-            if searchResults.isEmpty {
+            if model.results.isEmpty {
                 Text(AppText.ocNoResults)
                     .font(.system(size: 13))
                     .foregroundStyle(Color.appSecondary)
@@ -383,14 +434,13 @@ struct OCHomeView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 0) {
-                        ForEach(searchResults) { session in
+                        ForEach(model.results) { session in
                             Button {
                                 query = ""
                                 searchFocused = false
                                 onSelect(session)
-                            } label: { OCSessionRow(session: session) }
+                            } label: { OCSessionRow(session: session, isBusy: isBusy(session)) }
                                 .buttonStyle(.plain)
-                                .accessibilityIdentifier("oc.result.\(session.id)")
                         }
                     }
                 }
@@ -400,33 +450,34 @@ struct OCHomeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
-        .shadow(color: .black.opacity(0.12), radius: 12, y: 4)
+        .surfaceShadow()
     }
 
     // MARK: List
 
     @ViewBuilder
-    private var content: some View {
+    private func content(_ model: Model) -> some View {
         if isLoading && sessions.isEmpty {
             ProgressView().tint(Color.appSecondary).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let loadError, sessions.isEmpty {
             errorState(loadError)
-        } else if groups.isEmpty {
+        } else if model.groups.isEmpty {
             emptyState
         } else {
-            list
+            list(model.groups)
         }
     }
 
-    private var list: some View {
+    private func list(_ groups: [OCHomeGroup]) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(groups.enumerated()), id: \.element.id) { index, group in
                     groupHeader(group, showsNew: index == 0)
                     ForEach(group.sessions) { session in
-                        Button { onSelect(session) } label: { OCSessionRow(session: session) }
+                        Button { onSelect(session) } label: {
+                            OCSessionRow(session: session, isBusy: isBusy(session))
+                        }
                             .buttonStyle(.plain)
-                            .accessibilityIdentifier("oc.row.\(session.id)")
                             .contextMenu {
                                 Button(role: .destructive) { sessionToDelete = session } label: {
                                     Label(AppText.delete, systemImage: "trash")
@@ -502,21 +553,57 @@ struct OCHomeView: View {
 
     // MARK: Side effects
 
+    private func isBusy(_ session: OCSession) -> Bool {
+        let type = statuses[session.id]?.type
+        return type == .busy || type == .retry
+    }
+
     /// `silent` keeps the current rows on screen while reloading (appearing again after Settings etc.).
     private func load(silent: Bool) async {
         guard !isLoading else { return }
+        generation &+= 1
+        let mine = generation
         if !silent || sessions.isEmpty { isLoading = true }
-        defer { isLoading = false }
+        defer { if mine == generation { isLoading = false } }
         do {
             let result = try await sessionsService.listAllSessions()
-            guard !Task.isCancelled else { return }
-            sessions = sessionsService.applyingConfirmedViewedMarkers(to: result)
+            guard !Task.isCancelled, mine == generation else { return }
+            let snapshot = await sessionsService.refreshSessionOutcomes(
+                in: result, previousStatuses: statuses, openedSessionIDs: [], refreshInactive: true
+            )
+            guard !Task.isCancelled, mine == generation else { return }
+            sessions = sessionsService.applyingConfirmedViewedMarkers(to: snapshot.sessions)
+            statuses = snapshot.statuses
             loadError = nil
         } catch is CancellationError {
             return
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, mine == generation else { return }
             loadError = error.localizedDescription
+        }
+    }
+
+    /// Poll busy/idle every 2 s (unread attention every 30 s) while the home is active, as the old list did.
+    private func pollStatuses() async {
+        guard connection.serverCapabilities?.protocolVersion == .v2 || ScreenshotFixtures.isEnabled else { return }
+        var lastAttention = Date()
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, !sessions.isEmpty, !isLoading else { continue }
+            let mine = generation
+            let snapshot = await sessionsService.refreshSessionOutcomes(
+                in: sessions, previousStatuses: statuses, openedSessionIDs: [], refreshInactive: false
+            )
+            guard !Task.isCancelled, mine == generation else { continue }
+            var updated = sessionsService.applyingConfirmedViewedMarkers(to: snapshot.sessions)
+            statuses = snapshot.statuses
+            if Date().timeIntervalSince(lastAttention) >= 30 {
+                lastAttention = Date()
+                let refreshed = await sessionsService.refreshUnreadResults(in: updated, statuses: snapshot.statuses)
+                guard !Task.isCancelled, mine == generation else { continue }
+                updated = sessionsService.applyingConfirmedViewedMarkers(to: refreshed)
+            }
+            sessions = updated
         }
     }
 
@@ -524,6 +611,7 @@ struct OCHomeView: View {
         Task {
             do {
                 try await sessionsService.deleteSession(session)
+                generation &+= 1
                 sessions.removeAll { $0.id == session.id }
                 onDelete(session)
             } catch {
@@ -543,10 +631,10 @@ struct OCMonogram: View {
     var body: some View {
         Text(letter)
             .font(.system(size: size * 0.69, weight: .semibold))
-            .foregroundStyle(.white)
+            .foregroundStyle(Color.appBackground)
             .frame(width: size, height: size)
             .background(
-                Color(white: 0.36),
+                Color.appSecondary,
                 in: RoundedRectangle(cornerRadius: OpenLensDesignSystem.currentTheme.radius.iconTile, style: .continuous)
             )
             .accessibilityHidden(true)
@@ -556,12 +644,21 @@ struct OCMonogram: View {
 /// 48 pt row: monogram, bold title, grey project name.
 struct OCSessionRow: View {
     let session: OCSession
+    var isBusy = false
 
     var body: some View {
         let project = OCHomeGrouping.projectName(for: session)
+        let unread = !isBusy && session.hasUnreadResult
         let title = session.title.isEmpty ? AppText.ocNewSession : session.title
         HStack(spacing: 8) {
             OCMonogram(letter: OCHomeGrouping.monogram(project))
+                .overlay(alignment: .topTrailing) {
+                    if unread {
+                        Circle().fill(Color.appAccent).frame(width: 6, height: 6)
+                            .overlay(Circle().stroke(Color.appBackground, lineWidth: 1))
+                            .offset(x: 3, y: -3)
+                    }
+                }
                 .frame(width: 24, alignment: .leading)
             VStack(alignment: .leading, spacing: 0) {
                 Text(title)
@@ -574,12 +671,32 @@ struct OCSessionRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
+            if isBusy {
+                ProgressView().controlSize(.small).tint(Color.appSecondary)
+            }
         }
         .padding(.horizontal, 6)
         .frame(height: 48)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(project)")
+        .accessibilityLabel(unread ? "\(title), \(project), \(AppText.unreadResultAccessibility)" : "\(title), \(project)")
+        .modifier(UnreadIdentifier(sessionID: session.id, unread: unread))
+    }
+}
+
+/// Keeps the `session.unreadResult.<id>` identifier on unread rows only (an outer
+/// identifier would be pushed onto every child, so rows carry no other identifier).
+private struct UnreadIdentifier: ViewModifier {
+    let sessionID: String
+    let unread: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if unread {
+            content.accessibilityIdentifier("session.unreadResult.\(sessionID)")
+        } else {
+            content
+        }
     }
 }

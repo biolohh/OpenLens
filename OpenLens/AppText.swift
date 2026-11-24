@@ -545,4 +545,5 @@ enum AppText {
     static let ocNoResults = "No results"
     static let ocMenuTitle = "Tabs"
     static let ocCloseTab = "Close tab"
+    static let ocReconnecting = "Reconnecting"
 }
