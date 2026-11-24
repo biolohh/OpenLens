@@ -264,6 +264,11 @@ final class OCTerminalSocket {
         task.maximumMessageSize = 16 * 1024 * 1024
     }
 
+    /// Safety net: a socket nobody closed still ends its connection.
+    deinit {
+        task.cancel(with: .goingAway, reason: nil)
+    }
+
     func start(onMessage: @escaping (Incoming) -> Void, onClose: @escaping (Error?) -> Void) {
         task.resume()
         let task = self.task
