@@ -362,7 +362,11 @@ final class OpenLensSmokeTests: XCTestCase {
         } else {
             // Same state as the web pair: the "Last turn changes" mode of a git project.
             let mode = app.descendants(matching: .any).matching(identifier: "oc.changes.mode").firstMatch
-            if mode.waitForExistence(timeout: 5) {
+            if !mode.waitForExistence(timeout: 5) {
+                let dump = app.debugDescription.split(separator: "\n").filter { $0.contains("Changes") || $0.contains("changes") || $0.contains("Git") }.prefix(25).joined(separator: " | ")
+                XCTFail("Changes mode control not found. Hierarchy: \(dump)")
+            }
+            if mode.exists {
                 mode.tap()
                 let turn = app.descendants(matching: .any).matching(identifier: "oc.changes.mode.turn").firstMatch
                 XCTAssertTrue(turn.waitForExistence(timeout: 4), "Mode panel did not open")
