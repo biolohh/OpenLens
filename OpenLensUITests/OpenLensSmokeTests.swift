@@ -335,6 +335,13 @@ final class OpenLensSmokeTests: XCTestCase {
             let cardShown = card.waitForExistence(timeout: 8)
             if expectsFileCard { XCTAssertTrue(cardShown, "No file card in the session that edited files") }
             if cardShown {
+                // A card right above the composer sits under its hit area: bring it to the middle.
+                var nudges = 0
+                while card.frame.maxY > app.frame.height * 0.6, nudges < 4 {
+                    app.swipeUp()
+                    nudges += 1
+                    sleep(1)
+                }
                 let repinsBefore = repinCount(in: app)
                 card.tap()
                 sleep(3)
