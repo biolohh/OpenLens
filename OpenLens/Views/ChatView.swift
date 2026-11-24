@@ -24,6 +24,7 @@ struct ChatView: View {
     @Environment(\.connection) private var connection
     @Environment(\.workspaceService) private var workspaceService
     @Environment(\.chatEasterEgg) private var chatEasterEgg
+    @Environment(\.ocPanelBackground) private var ocPanelBackground
     @Environment(AppRouter.self) private var router: AppRouter?
     @AppStorage(FeatureFlags.debugFeaturesKey) private var debugFeaturesEnabled: Bool = FeatureFlags.debugFeaturesDefault
 
@@ -329,7 +330,7 @@ struct ChatView: View {
         if isRetroChat {
             RetroChatScreenBackground()
         } else {
-            Color.appBackground
+            ocPanelBackground ?? Color.appBackground
         }
     }
 
@@ -351,7 +352,7 @@ struct ChatView: View {
                 gradient: Gradient(
                     colors: [
                         .clear,
-                        Color.appBackground.opacity(0.7)
+                        (ocPanelBackground ?? Color.appBackground).opacity(0.7)
                     ]
                 ),
                 startPoint: .top,
@@ -2779,7 +2780,7 @@ private struct ChatMessagesListView: View {
         ScrollViewReader { proxy in
             ZStack(alignment: .bottomTrailing) {
                 ScrollView {
-                    Color.clear.frame(height: isRetroChat ? 150 : 72)
+                    Color.clear.frame(height: isRetroChat ? 150 : 10)
 
                     LazyVStack(alignment: .leading, spacing: isRetroChat ? 13 : 16) {
                         if chatClient.hasEarlierMessages {
@@ -3071,15 +3072,18 @@ private struct ChatMessagesListView: View {
         ), let anchorID = timelineItems.first?.id else { return }
 
         paginationRestoreAnchorID = anchorID
+        let anchorPartIDs = Set(timelineItems.first?.groupedParts.map(\.id) ?? [])
         chatClient.loadEarlierMessages()
         restorePositionAfterLoadingEarlierMessages(
             anchorID: anchorID,
+            anchorPartIDs: anchorPartIDs,
             using: proxy
         )
     }
 
     private func restorePositionAfterLoadingEarlierMessages(
         anchorID: String,
+        anchorPartIDs: Set<String> = [],
         using proxy: ScrollViewProxy
     ) {
         Task { @MainActor in
@@ -3091,8 +3095,15 @@ private struct ChatMessagesListView: View {
 
             var transaction = Transaction()
             transaction.animation = nil
+            // Earlier tool parts of the same turn join the first "Used N" group and change its
+            // id: follow the group that now contains the old anchor's parts.
+            let targetID = timelineItems.contains(where: { $0.id == anchorID })
+                ? anchorID
+                : (timelineItems.first { item in
+                    !item.groupedParts.isEmpty && item.groupedParts.contains { anchorPartIDs.contains($0.id) }
+                }?.id ?? anchorID)
             withTransaction(transaction) {
-                proxy.scrollTo(anchorID, anchor: .top)
+                proxy.scrollTo(targetID, anchor: .top)
             }
             paginationRestoreAnchorID = nil
         }

@@ -49,19 +49,49 @@ struct OCTimelineGroupingTests {
         #expect(result.count == 3)
     }
 
-    @Test func footerOnLastTextOfFinishedTurnWithDuration() {
-        let created = Date(timeIntervalSince1970: 1_000)
-        let user = ChatMessage(id: "u", role: .user, content: "hi", createdAt: created)
-        let part = OCPart(
-            id: "x", sessionID: "s", messageID: "a", type: .text, text: "Done",
-            time: AnyCodable(["start": 1_000_000.0, "end": 1_155_000.0])
-        )
-        let assistant = ChatMessage(id: "a", role: .assistant, content: "", parts: [part])
+    @Test func footerOnLastTextOfFinishedTurnWithServerDuration() {
+        let user = ChatMessage(id: "u", role: .user, content: "hi", createdAt: Date(timeIntervalSince1970: 1_000))
+        user.createdAtIsServer = true
+        let assistant = ChatMessage(id: "a", role: .assistant, content: "", parts: [text("x", "Done", in: "a")])
+        assistant.completedAt = Date(timeIntervalSince1970: 1_155)
         let footer = items([user, assistant]).compactMap(\.assistantFooter).first
         #expect(footer != nil)
         #expect(footer?.duration == 155)
         #expect(OCTimelineGrouping.durationText(155) == "2m 35s")
         #expect(OCTimelineGrouping.durationText(15) == "15s")
+    }
+
+    @Test func noDurationWithoutServerTimes() {
+        let user = ChatMessage(id: "u", role: .user, content: "hi")
+        let assistant = ChatMessage(id: "a", role: .assistant, content: "", parts: [text("x", "Done", in: "a")])
+        assistant.completedAt = Date().addingTimeInterval(30)
+        let footer = items([user, assistant]).compactMap(\.assistantFooter).first
+        #expect(footer != nil)
+        #expect(footer?.duration == nil)
+    }
+
+    @Test func footerCopiesAllAssistantTextOfTheTurn() {
+        let user = ChatMessage(id: "u", role: .user, content: "hi")
+        let a1 = ChatMessage(id: "a1", role: .assistant, content: "", parts: [text("x1", "First", in: "a1")])
+        let a2 = ChatMessage(id: "a2", role: .assistant, content: "", parts: [text("x2", "Second", in: "a2")])
+        let footer = items([user, a1, a2]).compactMap(\.assistantFooter).first
+        #expect(footer?.messages.count == 2)
+        #expect(OCTimelineGrouping.responseText(footer?.messages ?? []) == "First\n\nSecond")
+    }
+
+    @Test func groupStatusFlagsFailedAndRunning() {
+        let failed = OCPart(
+            id: "t", sessionID: "s", messageID: "a", type: .tool, callID: "t", tool: "bash",
+            state: OCToolState(status: .error, input: AnyCodable([:]))
+        )
+        let running = OCPart(
+            id: "r", sessionID: "s", messageID: "a", type: .tool, callID: "r", tool: "read",
+            state: OCToolState(status: .running, input: AnyCodable([:]))
+        )
+        let m = ChatMessage(id: "a", role: .assistant, content: "", parts: [failed, running])
+        let status = OCTimelineGrouping.status(m.assistantSegments)
+        #expect(status.failed)
+        #expect(status.running)
     }
 
     @Test func streamingTurnHasNoFooter() {

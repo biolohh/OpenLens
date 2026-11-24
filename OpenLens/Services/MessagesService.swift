@@ -256,6 +256,7 @@ final class MessagesService {
             finish: msg.info.finish,
             parentUserMessageID: msg.info.parentID
         )
+        message.createdAtIsServer = msg.info.createdTimestamp != nil
         message.completedAt = msg.info.time?.completedSeconds.map { Date(timeIntervalSince1970: $0) }
         return message
     }

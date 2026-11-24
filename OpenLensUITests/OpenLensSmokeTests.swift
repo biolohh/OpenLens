@@ -172,7 +172,13 @@ final class OpenLensSmokeTests: XCTestCase {
         snapshot("03-chat-empty")
         walkSessionScreen(in: app)
 
-        guard let prompt, !prompt.isEmpty else { return }
+        guard let prompt, !prompt.isEmpty else {
+            // The navigation bar is hidden: the interactive edge-swipe back must still work.
+            let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.003, dy: 0.5))
+            edge.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+            XCTAssertTrue(app.buttons["oc.projectPicker"].waitForExistence(timeout: 6), "Edge swipe did not return to Home")
+            return
+        }
         let composer = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
         XCTAssertTrue(composer.waitForExistence(timeout: 10), "No composer")
         composer.tap()
@@ -208,8 +214,30 @@ final class OpenLensSmokeTests: XCTestCase {
         if used.waitForExistence(timeout: 10) {
             used.tap()
             sleep(1)
+            let line = app.buttons["oc.toolLine"].firstMatch
+            if line.waitForExistence(timeout: 5) {
+                line.tap()
+                sleep(1)
+                snapshot("03-chat-tool-line-open")
+                line.tap()
+            }
             snapshot("03-chat-used-expanded")
             used.tap()
+        }
+
+        // Rewind asks for confirmation (cancelled here: never revert the real session).
+        let bubble = app.staticTexts["vondd vissza"].firstMatch
+        if bubble.waitForExistence(timeout: 3) {
+            bubble.tap()
+            let rewind = app.buttons["oc.rewind"]
+            if rewind.waitForExistence(timeout: 3), rewind.isEnabled {
+                rewind.tap()
+                let confirm = app.buttons["Rewind"]
+                XCTAssertTrue(confirm.waitForExistence(timeout: 3), "Rewind confirmation missing")
+                snapshot("03-chat-rewind-confirm")
+                let cancel = app.buttons["Cancel"]
+                if cancel.exists { cancel.tap() }
+            }
         }
 
         app.buttons["oc.tab.changes"].tap()
@@ -222,6 +250,10 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["oc.more.files"].waitForExistence(timeout: 5), "More sheet missing Files")
         XCTAssertTrue(app.buttons["oc.more.usage"].exists, "More sheet missing Usage")
         snapshot("03-chat-more")
+        // Session details opens after the More sheet finished dismissing.
+        app.buttons["oc.more.details"].tap()
+        XCTAssertTrue(app.segmentedControls.firstMatch.waitForExistence(timeout: 8), "Session details sheet missing")
+        snapshot("03-chat-details")
         app.swipeDown()
         sleep(1)
         app.buttons["oc.tab.session"].tap()

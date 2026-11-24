@@ -7,6 +7,7 @@ struct OCUserMessageRow: View {
     let message: ChatMessage
 
     @State private var showsActions = false
+    @State private var confirmsRewind = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -20,7 +21,7 @@ struct OCUserMessageRow: View {
             if showsActions {
                 HStack(spacing: 6) {
                     Button {
-                        Task { await chatClient.undo(message) }
+                        confirmsRewind = true
                     } label: {
                         Image(systemName: "arrow.uturn.backward").frame(width: 20, height: 20)
                     }
@@ -47,6 +48,21 @@ struct OCUserMessageRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        .confirmationDialog(AppText.ocRewind, isPresented: $confirmsRewind, titleVisibility: .visible) {
+            Button(AppText.ocRewindConfirm, role: .destructive) {
+                Task { await chatClient.undo(message) }
+            }
+            Button(AppText.cancel, role: .cancel) {}
+        } message: {
+            Text(AppText.ocRewindMessage)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityAction(named: AppText.ocRewind) {
+            if chatClient.canUndo(message) { confirmsRewind = true }
+        }
+        .accessibilityAction(named: AppText.copyMessage) {
+            UIPasteboard.general.string = message.content
+        }
     }
 
     static func dateText(_ date: Date) -> String {
@@ -58,18 +74,10 @@ struct OCUserMessageRow: View {
 struct OCAssistantFooter: View {
     let info: OCAssistantFooterInfo
 
-    private static func text(of message: ChatMessage) -> String {
-        let texts = message.assistantSegments.compactMap { segment -> String? in
-            if case .text(let text) = segment.kind { return text }
-            return nil
-        }
-        return texts.isEmpty ? message.content : texts.joined(separator: "\n\n")
-    }
-
     var body: some View {
         HStack(spacing: 6) {
             Button {
-                UIPasteboard.general.string = Self.text(of: info.message)
+                UIPasteboard.general.string = OCTimelineGrouping.responseText(info.messages)
             } label: {
                 Image(systemName: "doc.on.doc").frame(width: 20, height: 20)
             }

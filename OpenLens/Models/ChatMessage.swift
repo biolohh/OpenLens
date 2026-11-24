@@ -404,6 +404,8 @@ final class ChatMessage: Identifiable {
         var files: [ToolResultFile] = []
         /// Returned files beyond what one row shows.
         var omittedFileCount = 0
+        /// The call has not finished yet.
+        var isRunning = false
     }
 
     struct PersistedQuestionStep: Identifiable {
@@ -546,6 +548,8 @@ final class ChatMessage: Identifiable {
     let createdAt: Date
     /// Server completion time of an assistant message (web turn duration); nil while running.
     var completedAt: Date?
+    /// True when `createdAt` came from the server (not the local clock of an optimistic message).
+    var createdAtIsServer = false
     var cost: Double?
     var tokens: OCTokenUsage?
 
@@ -2068,7 +2072,8 @@ final class ChatMessage: Identifiable {
                 files: state.files.enumerated().map { index, file in
                     ToolResultFile(file: file, id: "\(part.id)-file-\(index)")
                 },
-                omittedFileCount: state.omittedFileCount
+                omittedFileCount: state.omittedFileCount,
+                isRunning: state.status == .running
             )
         }
     }

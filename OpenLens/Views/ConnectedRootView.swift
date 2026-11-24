@@ -382,16 +382,16 @@ private struct SessionChatDestinationView: View {
     var body: some View {
         OCSessionView(chatClient: chatClient, session: session, isReady: isReady)
             .background(Color.appBackground)
-        .task(id: session.id) {
-            isReady = false
-            if chatClient.currentSession?.id != session.id {
-                await chatClient.loadSession(session)
-            } else {
-                await chatClient.restoreProjectContext(for: session)
+            .task(id: session.id) {
+                isReady = false
+                if chatClient.currentSession?.id != session.id {
+                    await chatClient.loadSession(session)
+                } else {
+                    await chatClient.restoreProjectContext(for: session)
+                }
+                guard !Task.isCancelled, chatClient.currentSession?.id == session.id else { return }
+                isReady = true
             }
-            guard !Task.isCancelled, chatClient.currentSession?.id == session.id else { return }
-            isReady = true
-        }
     }
 }
 

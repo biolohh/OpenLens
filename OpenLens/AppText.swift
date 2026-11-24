@@ -559,5 +559,10 @@ enum AppText {
     static let ocRewind = "Rewind to here"
     static let ocMoreActions = "More actions"
     static let ocUsedPrefix = "Used"
+    static let ocToolFailed = "A call failed"
+    static let ocToolRunning = "A call is running"
+    static let ocRewindConfirm = "Rewind"
+    static let ocRewindMessage = "Reverts this message and everything after it, including file changes."
+    static let ocBack = "Back"
     static let ocReconnecting = "Reconnecting"
 }
