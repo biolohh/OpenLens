@@ -23,7 +23,10 @@ struct OCFilesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityIdentifier("oc.files")
+        // A marker, not an identifier on the container (that one would replace the children's).
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.files")
+        }
     }
 
     private var tabStrip: some View {
@@ -84,12 +87,18 @@ private struct OCFileTree: View {
     let onOpen: (String) -> Void
 
     @Environment(\.workspaceService) private var workspaceService
+    @Environment(\.connection) private var connection
     @State private var children: [String: [RepositoryEntry]] = [:]
+    /// Folders whose listing failed: shown as a retry row, never cached as empty.
+    @State private var failedFolders: Set<String> = []
     @State private var expanded: Set<String> = []
     @State private var failed: String?
     @State private var loadingRoot = true
     @State private var filter = ""
     @State private var results: [RepositoryEntry]?
+
+    /// Name search exists on v2 servers only.
+    private var supportsFilter: Bool { connection.serverCapabilities?.protocolVersion == .v2 }
 
     private var rootName: String {
         let name = ((directory ?? "") as NSString).lastPathComponent
@@ -103,7 +112,7 @@ private struct OCFileTree: View {
                 .foregroundStyle(Color.appPrimary)
                 .frame(maxWidth: .infinity)
                 .frame(height: 48)
-            filterField
+            if supportsFilter { filterField }
             content
         }
         .task(id: directory) { await loadRoot() }
@@ -143,7 +152,7 @@ private struct OCFileTree: View {
             }
             .padding(24)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if !filter.trimmingCharacters(in: .whitespaces).isEmpty {
+        } else if supportsFilter, !filter.trimmingCharacters(in: .whitespaces).isEmpty {
             ScrollView {
                 LazyVStack(spacing: 0) {
                     if let results, results.isEmpty {
@@ -174,15 +183,27 @@ private struct OCFileTree: View {
         (children[parent] ?? []).flatMap { entry -> [(entry: RepositoryEntry, depth: Int)] in
             var rows = [(entry: entry, depth: depth)]
             if entry.isDirectory, expanded.contains(entry.path) {
+                if failedFolders.contains(entry.path) {
+                    rows.append((entry: Self.failureRow(for: entry.path), depth: depth + 1))
+                }
                 rows += visibleRows(of: entry.path, depth: depth + 1)
             }
             return rows
         }
     }
 
+    private static let failureMarker = "\u{0}failed:"
+
+    private static func failureRow(for folder: String) -> RepositoryEntry {
+        RepositoryEntry(path: failureMarker + folder, name: AppText.ocFolderLoadFailed, isDirectory: false)
+    }
+
     private func row(_ entry: RepositoryEntry, depth: Int, showsPath: Bool) -> some View {
+        if entry.path.hasPrefix(Self.failureMarker) {
+            return AnyView(failureRowView(entry, depth: depth))
+        }
         let open = expanded.contains(entry.path)
-        return Button {
+        return AnyView(Button {
             if entry.isDirectory {
                 if open {
                     expanded.remove(entry.path)
@@ -226,12 +247,32 @@ private struct OCFileTree: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier("oc.files.row")
         .accessibilityLabel(entry.path)
-        .accessibilityValue(entry.isDirectory ? (open ? "expanded" : "collapsed") : "")
+        .accessibilityValue(entry.isDirectory ? (open ? "expanded" : "collapsed") : ""))
+    }
+
+    private func failureRowView(_ entry: RepositoryEntry, depth: Int) -> some View {
+        let folder = String(entry.path.dropFirst(Self.failureMarker.count))
+        return Button {
+            Task { await loadChildren(of: folder) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.circle").font(.system(size: 11)).foregroundStyle(Color.appDanger)
+                Text("\(AppText.ocFolderLoadFailed) · \(AppText.tryAgain)")
+                    .font(.system(size: 13)).foregroundStyle(Color.appSecondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 8 + CGFloat(depth) * 16)
+            .frame(height: 28)
+            .padding(.horizontal, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("oc.files.retry")
     }
 
     private func loadRoot() async {
         guard let directory else {
-            failed = AppText.ocFileNotText
+            failed = AppText.ocFolderMissing
             loadingRoot = false
             return
         }
@@ -248,7 +289,13 @@ private struct OCFileTree: View {
 
     private func loadChildren(of path: String) async {
         guard let directory, children[path] == nil else { return }
-        children[path] = (try? await workspaceService.loadRepositoryEntries(at: path, in: directory, includesHidden: true)) ?? []
+        do {
+            children[path] = try await workspaceService.loadRepositoryEntries(at: path, in: directory, includesHidden: true)
+            failedFolders.remove(path)
+        } catch {
+            guard !(error is CancellationError) else { return }
+            failedFolders.insert(path)
+        }
     }
 
     /// Server-side name search (debounced), the web's "Filter files".
@@ -260,7 +307,7 @@ private struct OCFileTree: View {
         }
         try? await Task.sleep(for: .milliseconds(250))
         guard !Task.isCancelled else { return }
-        results = (try? await workspaceService.searchRepositoryFiles(matching: query, in: directory)) ?? []
+        results = (try? await workspaceService.searchRepositoryFiles(matching: query, in: directory, includesHidden: true)) ?? []
     }
 }
 
@@ -323,15 +370,19 @@ private struct OCFileTextView: View {
 
     private func load() async {
         guard let directory else {
-            state = .failed(AppText.ocFileNotText)
+            state = .failed(AppText.ocFolderMissing)
             return
         }
         state = .loading
         do {
             let text = try await workspaceService.readRepositoryFile(at: path, in: directory)
             guard !Task.isCancelled else { return }
-            let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            state = .text(Array(lines.prefix(Self.maximumLines)))
+            let maximum = Self.maximumLines
+            let lines = await Task.detached(priority: .userInitiated) {
+                OCFileSupport.cappedLines(text, maximumLines: maximum)
+            }.value
+            guard !Task.isCancelled else { return }
+            state = .text(lines)
         } catch {
             guard !Task.isCancelled else { return }
             state = .failed(error.localizedDescription)

@@ -268,10 +268,19 @@ struct OCUsedToolsRow: View {
         if let segment = part.segment {
             switch segment.kind {
             case .tool(let step):
-                if OCFileSupport.isFileTool(step.toolName) {
-                    OCFileToolLine(part: part) { toolLine(part, step) }
-                } else {
-                    toolLine(part, step)
+                // The detail sheet hangs on the row, so a file card can open it from its menu too.
+                Group {
+                    if OCFileSupport.isFileTool(step.toolName) {
+                        OCFileToolLine(part: part, onDetails: { detailPartID = part.id }) { toolLine(part, step) }
+                    } else {
+                        toolLine(part, step)
+                    }
+                }
+                .sheet(isPresented: Binding(
+                    get: { detailPartID == part.id },
+                    set: { if !$0 { detailPartID = nil } }
+                )) {
+                    detailSheet(step)
                 }
             case .reasoning(let text):
                 Text(segment.streamingText?.copyText() ?? text)
@@ -307,27 +316,26 @@ struct OCUsedToolsRow: View {
             .buttonStyle(.plain)
             .accessibilityIdentifier("oc.toolLine")
         }
-        .sheet(isPresented: Binding(
-            get: { detailPartID == part.id },
-            set: { if !$0 { detailPartID = nil } }
-        )) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 8) {
-                    Text(title).fontWeight(.semibold)
-                    Text(detail(step, title: title)).foregroundStyle(Color.appSecondary)
-                    Spacer(minLength: 0)
-                }
-                .font(.system(size: 13))
-                ScrollView { detailView(step).frame(maxWidth: .infinity, alignment: .leading) }
+    }
+
+    private func detailSheet(_ step: ChatMessage.PersistedToolStep) -> some View {
+        let title = OCTimelineGrouping.toolTitle(step.toolName)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(title).fontWeight(.semibold)
+                Text(detail(step, title: title)).foregroundStyle(Color.appSecondary)
+                Spacer(minLength: 0)
             }
-            .padding(16)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .foregroundStyle(Color.appPrimary)
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(Color.appBackground)
-            .accessibilityIdentifier("oc.toolDetail")
+            .font(.system(size: 13))
+            ScrollView { detailView(step).frame(maxWidth: .infinity, alignment: .leading) }
         }
+        .padding(16)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .foregroundStyle(Color.appPrimary)
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(Color.appBackground)
+        .accessibilityIdentifier("oc.toolDetail")
     }
 
     /// Output preview, partial output before an error, returned files and a copy button.

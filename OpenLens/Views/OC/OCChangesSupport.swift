@@ -22,6 +22,11 @@ extension AppText {
     static let ocFileCloseTab = "Close file"
     static let ocShowFullDiff = "Show full diff"
     static let ocNoDiff = "No line-level diff available."
+    static let ocToolDetails = "Details"
+    static let ocLargeDiff = "Large diff, tap to load"
+    static let ocFolderMissing = "No folder for this session"
+    static let ocFolderLoadFailed = "Couldn't load"
+    static func ocShowMoreLines(_ count: Int) -> String { "Show \(count) more lines" }
 }
 
 // MARK: - Changes model
@@ -52,20 +57,64 @@ struct OCChangesAvailability: Equatable, Sendable {
     let modes: [OCChangesMode]
 }
 
+/// A file a tool call changed, with whether its diff lines carry the file's real line numbers
+/// (an Edit without a server patch only has the replaced snippet).
+nonisolated struct OCToolFileChange: Identifiable, Hashable, Sendable {
+    let file: ReviewFileChange
+    let hasRealLineNumbers: Bool
+    var id: String { file.id }
+}
+
 /// Pure helpers shared by the Changes tab, the Used-N file card and the Files tab (unit-tested).
 enum OCFileSupport {
+    /// Longest diff / file line that is laid out; longer ones end in an ellipsis.
+    nonisolated static let maximumLineCharacters = 500
+    /// Changed lines above which a diff waits for a tap.
+    nonisolated static let largeDiffLines = 2000
+
     /// "_scratch/PROGRESS.md" -> ("_scratch/", "PROGRESS.md"); the directory keeps its trailing slash.
-    static func split(path: String) -> (directory: String, name: String) {
+    nonisolated static func split(path: String) -> (directory: String, name: String) {
         guard let slash = path.lastIndex(of: "/") else { return ("", path) }
         let next = path.index(after: slash)
         return (String(path[..<next]), String(path[next...]))
     }
 
     /// Path relative to the session folder when the server reports an absolute one.
-    static func relative(_ path: String, to directory: String?) -> String {
+    nonisolated static func relative(_ path: String, to directory: String?) -> String {
         guard let directory, !directory.isEmpty else { return path }
         let root = directory.hasSuffix("/") ? directory : directory + "/"
         return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
+    }
+
+    /// Same folder, whatever the trailing slashes.
+    nonisolated static func sameFolder(_ lhs: String?, _ rhs: String?) -> Bool {
+        func normalized(_ value: String?) -> String? {
+            guard var value, !value.isEmpty else { return nil }
+            while value.count > 1, value.hasSuffix("/") { value.removeLast() }
+            return value
+        }
+        guard let lhs = normalized(lhs), let rhs = normalized(rhs) else { return false }
+        return lhs == rhs
+    }
+
+    /// `directory` is the same as, or lies inside, `root`.
+    nonisolated static func isInside(_ directory: String?, root: String?) -> Bool {
+        guard let directory, let root, !root.isEmpty else { return false }
+        if sameFolder(directory, root) { return true }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return directory.hasPrefix(prefix)
+    }
+
+    nonisolated static func truncated(_ line: String) -> String {
+        line.count > maximumLineCharacters ? String(line.prefix(maximumLineCharacters)) + "…" : line
+    }
+
+    /// The first `maximumLines` lines of a file, each cut at `maximumLineCharacters`; the rest of a
+    /// huge file is never split or mapped.
+    nonisolated static func cappedLines(_ text: String, maximumLines: Int) -> [String] {
+        text.split(separator: "\n", maxSplits: maximumLines, omittingEmptySubsequences: false)
+            .prefix(maximumLines)
+            .map { truncated(String($0)) }
     }
 
     static func statusLabel(_ status: String) -> String {
@@ -82,55 +131,63 @@ enum OCFileSupport {
         case "html", "htm": ("chevron.left.forwardslash.chevron.right", .orange)
         case "md", "markdown": ("text.alignleft", .blue)
         case "css", "scss": ("number", .blue)
-        case "js", "ts", "jsx", "tsx", "swift", "py", "sh", "rs", "go", "kt": ("curlybraces", .yellow)
+        case "js", "ts", "jsx", "tsx", "swift", "py", "sh", "rs", "go", "kt": ("curlybraces", Color.appWarning)
         case "json", "yml", "yaml", "toml": ("curlybraces.square", .purple)
         case "png", "jpg", "jpeg", "gif", "webp", "svg", "heic": ("photo", .green)
         default: ("doc.text", nil)
         }
     }
 
-    static func isFileTool(_ toolName: String) -> Bool {
+    nonisolated static func isFileTool(_ toolName: String) -> Bool {
         ["edit", "write", "apply_patch", "patch"].contains(toolName.lowercased())
     }
 
-    /// The file a finished Edit / Write / apply_patch call changed, from the tool part:
-    /// the server's own per-call patch (`metadata.files`) for edit and apply_patch, the written
-    /// content for write. Nil when the part carries neither.
-    static func fileChanges(of part: OCPart) -> [ReviewFileChange] {
+    /// The file(s) a finished Edit / Write / apply_patch call changed, from the tool part:
+    /// the server's own per-call patch (`metadata.files`), else the written content (write) or the
+    /// replaced snippet (edit). Empty while the call is not completed.
+    nonisolated static func fileChanges(of part: OCPart) -> [OCToolFileChange] {
         guard part.type == .tool, let state = part.state, state.status == .completed else { return [] }
         let tool = (part.tool ?? "").lowercased()
-        guard ["edit", "write", "apply_patch", "patch"].contains(tool) else { return [] }
+        guard isFileTool(tool) else { return [] }
 
         if let raw = state.metadata?["files"]?.value as? [Any] {
-            let changes = raw.compactMap { item -> ReviewFileChange? in
+            let changes = raw.compactMap { item -> OCToolFileChange? in
                 guard let dict = item as? [String: Any],
                       let file = (dict["file"] as? String) ?? (dict["relativePath"] as? String) ?? (dict["filePath"] as? String)
                 else { return nil }
                 let patch = (dict["patch"] as? String) ?? (dict["diff"] as? String)
                 let status = (dict["status"] as? String) ?? (dict["type"] as? String)
-                return ReviewFileChange(diff: OCFileDiff(
-                    file: file,
-                    status: status,
-                    additions: dict["additions"] as? Int,
-                    deletions: dict["deletions"] as? Int,
-                    before: dict["before"] as? String,
-                    after: dict["after"] as? String,
-                    patchText: patch
-                ))
+                return OCToolFileChange(
+                    file: ReviewFileChange(diff: OCFileDiff(
+                        file: file,
+                        status: status,
+                        additions: dict["additions"] as? Int,
+                        deletions: dict["deletions"] as? Int,
+                        before: dict["before"] as? String,
+                        after: dict["after"] as? String,
+                        patchText: patch
+                    )),
+                    hasRealLineNumbers: patch != nil
+                )
             }
             if !changes.isEmpty { return changes }
         }
 
         guard let input = state.input?.value as? [String: Any] else { return [] }
-        let path = (input["path"] as? String) ?? (input["filePath"] as? String)
-        guard let path else { return [] }
+        guard let path = (input["path"] as? String) ?? (input["filePath"] as? String) else { return [] }
         if tool == "write", let content = input["content"] as? String {
             var lines = content.split(separator: "\n", omittingEmptySubsequences: false)
             if lines.last == "" { lines.removeLast() }
-            return [ReviewFileChange(diff: OCFileDiff(file: path, status: "A", additions: lines.count, deletions: 0, after: content))]
+            return [OCToolFileChange(
+                file: ReviewFileChange(diff: OCFileDiff(file: path, status: "A", additions: lines.count, deletions: 0, after: content)),
+                hasRealLineNumbers: true
+            )]
         }
         if tool == "edit", let old = input["oldString"] as? String, let new = input["newString"] as? String {
-            return [ReviewFileChange(diff: OCFileDiff(file: path, before: old, after: new))]
+            return [OCToolFileChange(
+                file: ReviewFileChange(diff: OCFileDiff(file: path, before: old, after: new)),
+                hasRealLineNumbers: false
+            )]
         }
         return []
     }
@@ -199,19 +256,27 @@ struct OCDiffCounts: View {
 
 /// The web's unified diff: line number column, wrapped monospace lines, added lines tinted green
 /// with a 2 pt bar on the left, removed ones red. Plain `VStack` (no nested lazy or horizontal
-/// scrolling), so it is safe inside a transcript row; long diffs are cut at `maximumLines`.
+/// scrolling), so it is safe inside a transcript row. Every line is cut at
+/// `OCFileSupport.maximumLineCharacters`; only `maximumLines` rows are laid out.
 struct OCDiffBlock: View {
     let file: ReviewFileChange
-    var maximumLines = 400
-    /// Reports how many diff lines exist (the card shows "Show all" when it clips).
+    var maximumLines = Int.max
+    var showsLineNumbers = true
+    /// A "Show N more lines" footer grows the block in place (Changes rows); the card's own
+    /// "Show full diff" button handles it otherwise.
+    var expandsInPlace = false
+    /// Rows are built lazily (the sheet with a whole diff); inside the transcript they are not.
+    var isLazy = false
+    /// Reports how many diff lines exist (nil until the hunks are built).
     var onLineCount: (Int) -> Void = { _ in }
 
-    @State private var hunks: [UnifiedDiffHunk]?
+    @State private var lines: [UnifiedDiffLine]?
+    @State private var limit = 0
 
     var body: some View {
         Group {
-            if let hunks {
-                content(hunks)
+            if let lines {
+                content(lines)
             } else {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -220,25 +285,29 @@ struct OCDiffBlock: View {
         .task(id: file) {
             let file = file
             let built = await Task.detached(priority: .userInitiated) {
-                UnifiedDiffBuilder.makeHunks(file: file)
+                UnifiedDiffBuilder.makeHunks(file: file).flatMap(\.lines)
             }.value
-            hunks = built
-            onLineCount(built.reduce(0) { $0 + $1.lines.count })
+            lines = built
+            onLineCount(built.count)
         }
     }
 
     @ViewBuilder
-    private func content(_ hunks: [UnifiedDiffHunk]) -> some View {
-        let lines = Array(hunks.flatMap(\.lines).prefix(maximumLines))
-        if lines.isEmpty {
+    private func content(_ all: [UnifiedDiffLine]) -> some View {
+        let shown = min(all.count, max(limit, maximumLines))
+        if all.isEmpty {
             Text(AppText.ocNoDiff)
                 .font(.system(size: 13))
                 .foregroundStyle(Color.appSecondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(12)
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(lines) { line in row(line) }
+            Group {
+                if isLazy {
+                    LazyVStack(alignment: .leading, spacing: 0) { rows(all, shown: shown) }
+                } else {
+                    VStack(alignment: .leading, spacing: 0) { rows(all, shown: shown) }
+                }
             }
             .overlay(alignment: .topLeading) {
                 Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.diff")
@@ -246,14 +315,32 @@ struct OCDiffBlock: View {
         }
     }
 
+    @ViewBuilder
+    private func rows(_ all: [UnifiedDiffLine], shown: Int) -> some View {
+        ForEach(all.prefix(shown)) { line in row(line) }
+        if expandsInPlace, all.count > shown {
+            Button {
+                limit = shown + 400
+            } label: {
+                Text(AppText.ocShowMoreLines(all.count - shown))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.appPrimary)
+                    .frame(maxWidth: .infinity, minHeight: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.diff.more")
+        }
+    }
+
     private func row(_ line: UnifiedDiffLine) -> some View {
         HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(bar(line.kind)).frame(width: 2)
-            Text((line.newLineNumber ?? line.oldLineNumber).map(String.init) ?? "")
+            Text(showsLineNumbers ? (line.newLineNumber ?? line.oldLineNumber).map(String.init) ?? "" : "")
                 .font(.openLensMono(size: 12))
                 .foregroundStyle(Color.appSecondary)
-                .frame(width: 38, alignment: .trailing)
-            Text(line.text.isEmpty ? " " : line.text)
+                .frame(width: showsLineNumbers ? 38 : 4, alignment: .trailing)
+            Text(line.text.isEmpty ? " " : OCFileSupport.truncated(line.text))
                 .font(.openLensMono(size: 12))
                 .foregroundStyle(Color.appPrimary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -282,29 +369,59 @@ struct OCDiffBlock: View {
     }
 }
 
+/// A diff that waits for a tap above `OCFileSupport.largeDiffLines` changed lines.
+struct OCGuardedDiff: View {
+    let file: ReviewFileChange
+    var showsLineNumbers = true
+    @State private var loads = false
+
+    var body: some View {
+        if file.additions + file.deletions > OCFileSupport.largeDiffLines, !loads {
+            Button { loads = true } label: {
+                Text(AppText.ocLargeDiff)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.appPrimary)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.diff.large")
+        } else {
+            OCDiffBlock(file: file, maximumLines: 400, showsLineNumbers: showsLineNumbers, expandsInPlace: true)
+        }
+    }
+}
+
 // MARK: - Used-N file card
 
 /// An Edit / Write / apply_patch row inside an expanded "Used N" group: the web's file card.
 /// Until the part's file change is known (or when it has none) the ordinary tool line shows.
 struct OCFileToolLine<Fallback: View>: View {
     let part: OCGroupedPart
+    let onDetails: () -> Void
     @ViewBuilder let fallback: () -> Fallback
 
-    @State private var files: [ReviewFileChange]?
+    @State private var files: [OCToolFileChange]?
+
+    /// A running edit becomes a card when it completes: the task re-keys on the call's state.
+    private var taskKey: String {
+        guard let segment = part.segment, case .tool(let step) = segment.kind else { return part.id }
+        return "\(part.id)|\(step.isRunning)|\(step.isError)"
+    }
 
     var body: some View {
         Group {
             if let files, !files.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
-                        OCFileCard(file: file, stateID: "\(part.id)/\(index)")
+                    ForEach(Array(files.enumerated()), id: \.element.id) { index, change in
+                        OCFileCard(change: change, stateID: "\(part.id)/\(index)", onDetails: onDetails)
                     }
                 }
             } else {
                 fallback()
             }
         }
-        .task(id: part.id) {
+        .task(id: taskKey) {
             guard let raw = part.message.parts.first(where: { $0.id == part.segmentID }) else { return }
             files = await Task.detached(priority: .userInitiated) {
                 OCFileSupport.fileChanges(of: raw)
@@ -313,8 +430,6 @@ struct OCFileToolLine<Fallback: View>: View {
     }
 }
 
-/// Bordered card: file icon, directory muted + bold name, +N -N, chevron; opens the diff inline
-/// in a bounded scroll box.
 /// Which file cards are open, kept outside the views: the lazy transcript recycles rows, which
 /// would otherwise reset a card's own state.
 @MainActor @Observable
@@ -327,20 +442,24 @@ final class OCFileCardStore {
     }
 }
 
+/// Bordered card: file icon, directory muted + bold name, +N -N, chevron; opens a clipped diff.
+/// Long press / context menu: "Details" (the tool's output sheet).
 struct OCFileCard: View {
-    let file: ReviewFileChange
+    let change: OCToolFileChange
     let stateID: String
+    let onDetails: () -> Void
 
     @Environment(\.ocSessionDirectory) private var directory
     private var open: Bool { OCFileCardStore.shared.open.contains(stateID) }
     @State private var showsAll = false
-    @State private var lineCount = 0
+    @State private var lineCount: Int?
 
-    /// Rows shown inline; the rest opens in a sheet. A nested scroll view inside the lazy
-    /// transcript froze the main thread, so the inline diff is clipped, not scrolled.
+    /// Rows shown inline; the rest opens in a sheet. The inline diff is clipped, not scrolled:
+    /// a scroll view that grows inside the lazy transcript is what the repin loop fed on.
     private static let inlineLines = 30
 
     var body: some View {
+        let file = change.file
         let path = OCFileSupport.relative(file.path, to: directory)
         VStack(spacing: 0) {
             Button {
@@ -366,10 +485,12 @@ struct OCFileCard: View {
 
             if open {
                 Rectangle().fill(Color.appSeparator).frame(height: 1)
-                OCDiffBlock(file: file, maximumLines: Self.inlineLines) { lineCount = $0 }
-                    .frame(maxHeight: 250, alignment: .top)
-                    .clipped()
-                if lineCount > Self.inlineLines || lineCount == 0 {
+                OCDiffBlock(file: file, maximumLines: Self.inlineLines, showsLineNumbers: change.hasRealLineNumbers) {
+                    lineCount = $0
+                }
+                .frame(maxHeight: 250, alignment: .top)
+                .clipped()
+                if (lineCount ?? 0) > Self.inlineLines {
                     Button { showsAll = true } label: {
                         Text(AppText.ocShowFullDiff)
                             .font(.system(size: 13, weight: .medium))
@@ -382,11 +503,16 @@ struct OCFileCard: View {
                 }
             }
         }
+        .contextMenu {
+            Button(AppText.ocToolDetails, systemImage: "info.circle", action: onDetails)
+        }
         .sheet(isPresented: $showsAll) {
-            ScrollView { OCDiffBlock(file: file) }
-                .presentationDetents([.large])
-                .presentationDragIndicator(.visible)
-                .presentationBackground(Color.appBackground)
+            ScrollView {
+                OCDiffBlock(file: change.file, showsLineNumbers: change.hasRealLineNumbers, isLazy: true)
+            }
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appSeparator, lineWidth: 1)

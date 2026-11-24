@@ -297,7 +297,7 @@ final class WorkspaceService {
 
     /// Files whose path matches `query` inside a session's folder, in the
     /// server's ranking order. Matches names and paths, not file contents.
-    func searchRepositoryFiles(matching query: String, in directory: String) async throws -> [RepositoryEntry] {
+    func searchRepositoryFiles(matching query: String, in directory: String, includesHidden: Bool = false) async throws -> [RepositoryEntry] {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return [] }
         if ScreenshotFixtures.isEnabled {
@@ -308,9 +308,9 @@ final class WorkspaceService {
         let entries = try await client.findFiles(query: query, directory: directory)
         // Browsing hides dot-folders at each level; search reaches into them,
         // so drop any match inside one to keep both views consistent.
-        return Self.repositoryEntries(from: entries, directory: directory, keepsServerOrder: true)
+        return Self.repositoryEntries(from: entries, directory: directory, keepsServerOrder: true, includesHidden: includesHidden)
             .filter { entry in
-                !entry.isDirectory && !entry.path.split(separator: "/").contains { $0.hasPrefix(".") }
+                !entry.isDirectory && (includesHidden || !entry.path.split(separator: "/").contains { $0.hasPrefix(".") })
             }
     }
 

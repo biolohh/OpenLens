@@ -12,6 +12,8 @@ struct OCChangesView: View {
     }
 
     let session: OCSession
+    /// Bumps when the session timeline changes; the open tab reloads (debounced).
+    var refreshKey: UInt = 0
     /// "Open file": jumps to the Files tab with that path open.
     let openFile: (String) -> Void
 
@@ -29,6 +31,7 @@ struct OCChangesView: View {
         let sessionID: String
         let mode: OCChangesMode?
         let reload: Int
+        let refresh: UInt
     }
 
     var body: some View {
@@ -61,7 +64,7 @@ struct OCChangesView: View {
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.changes")
         }
-        .task(id: LoadKey(sessionID: session.id, mode: mode, reload: reloadToken)) { await load() }
+        .task(id: LoadKey(sessionID: session.id, mode: mode, reload: reloadToken, refresh: refreshKey)) { await load() }
     }
 
     // MARK: Header
@@ -139,6 +142,7 @@ struct OCChangesView: View {
                         showsModes = false
                         if option != mode {
                             expanded = []
+                            state = .loading
                             mode = option
                         }
                     } label: {
@@ -217,7 +221,7 @@ struct OCChangesView: View {
                     Spacer(minLength: 0)
                     if file.status.uppercased() != "D" {
                         Button {
-                            openFile(file.path)
+                            openFile(OCFileSupport.relative(file.path, to: session.directory))
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "arrow.up.forward.square").font(.system(size: 12))
@@ -234,7 +238,7 @@ struct OCChangesView: View {
                 .padding(.horizontal, 16)
                 .frame(height: 40)
                 .background(colorScheme == .dark ? Color.appBackground : Color.appTertiary.opacity(0.5))
-                OCDiffBlock(file: file)
+                OCGuardedDiff(file: file)
             }
         }
     }
@@ -312,6 +316,11 @@ struct OCChangesView: View {
                 return
             }
             guard let mode else { return }
+            // A reload caused by timeline changes waits for the burst to settle and keeps the list.
+            if case .loaded = state {
+                try? await Task.sleep(for: .milliseconds(700))
+                guard !Task.isCancelled else { return }
+            }
             let files = try await reviewService.loadChanges(sessionID: session.id, mode: mode)
             guard !Task.isCancelled else { return }
             state = .loaded(files)

@@ -263,7 +263,7 @@ final class OpenLensSmokeTests: XCTestCase {
         row.tap()
         sleep(3)
         snapshot("03-chat-empty")
-        walkSessionScreen(in: app)
+        walkSessionScreen(in: app, expectsFileCard: sessionTitle.contains("Wondednet"), expectsChanges: sessionTitle.contains("implementer"))
 
         guard let prompt, !prompt.isEmpty else {
             // The navigation bar is hidden: the interactive edge-swipe back must still work.
@@ -295,7 +295,7 @@ final class OpenLensSmokeTests: XCTestCase {
     }
 
     /// The web-style session screen: header, Session | Changes | More... tabs, the "Used N" group.
-    private func walkSessionScreen(in app: XCUIApplication) {
+    private func walkSessionScreen(in app: XCUIApplication, expectsFileCard: Bool = false, expectsChanges: Bool = false) {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.session").firstMatch
             .waitForExistence(timeout: 10), "Session screen marker missing")
         XCTAssertTrue(app.buttons["oc.tab.session"].exists, "Session tab missing")
@@ -326,7 +326,10 @@ final class OpenLensSmokeTests: XCTestCase {
                 }
                 card = app.buttons["oc.fileCard"].firstMatch
             }
-            if card.waitForExistence(timeout: 5) {
+            // The known-edit session must show the file card: no silent pass.
+            let cardShown = card.waitForExistence(timeout: 8)
+            if expectsFileCard { XCTAssertTrue(cardShown, "No file card in the session that edited files") }
+            if cardShown {
                 let repinsBefore = repinCount(in: app)
                 card.tap()
                 sleep(3)
@@ -379,7 +382,9 @@ final class OpenLensSmokeTests: XCTestCase {
             sleep(3)
             snapshot("03-chat-changes")
             let file = app.buttons["oc.changes.file"].firstMatch
-            if file.waitForExistence(timeout: 5) {
+            let fileShown = file.waitForExistence(timeout: 8)
+            if expectsChanges { XCTAssertTrue(fileShown, "Changes lists no files for the session that changed files") }
+            if fileShown {
                 app.buttons["oc.changes.expandAll"].tap()
                 sleep(2)
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch

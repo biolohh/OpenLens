@@ -2895,6 +2895,11 @@ private struct ChatMessagesListView: View {
 
     @State private var lastAutoScrollDate: Date = .distantPast
     @State private var lastHandledContentVersion: UInt?
+    /// Content version the geometry-driven repin last ran for, and how often it ran for it.
+    /// A row that grows in place (a tapped card or group) changes no content version, so it
+    /// can repin only a few times instead of looping with the layout it triggers.
+    @State private var repinContentVersion: UInt?
+    @State private var repinsForContentVersion = 0
     @State private var followLatest = true
     @State private var scrollInteraction = ChatScrollInteraction.idle
     @State private var scrollState = ChatScrollState.initial
@@ -2977,13 +2982,19 @@ private struct ChatMessagesListView: View {
                     )
                 } action: { _, state in
                     scrollState = state
+                    if repinContentVersion != chatClient.contentVersion {
+                        repinContentVersion = chatClient.contentVersion
+                        repinsForContentVersion = 0
+                    }
                     if ChatScrollPolicy.shouldRepinToBottom(
                         isLoading: chatClient.isLoading,
                         followLatest: followLatest,
                         interaction: scrollInteraction,
                         isAtBottom: state.isAtBottom,
-                        hasPendingRestoration: paginationRestoreAnchorID != nil
+                        hasPendingRestoration: paginationRestoreAnchorID != nil,
+                        repinsForContentVersion: repinsForContentVersion
                     ) {
+                        repinsForContentVersion += 1
                         scrollToBottom(using: proxy, animated: false, now: Date())
                     }
                 }
@@ -3626,6 +3637,10 @@ enum ChatScrollPolicy {
         return now.timeIntervalSince(lastAutoScrollDate) >= minimumInterval
     }
 
+    /// Geometry repins allowed while the content version stays the same: enough for a row that
+    /// settles after a jump (Markdown parsing), too few for an expander to loop.
+    static let maximumRepinsPerContentVersion = 3
+
     /// Finished rows can still grow after a jump to the latest message, for
     /// example when their Markdown finishes parsing. While the person follows
     /// the latest message, keep it pinned instead of stranding them above the
@@ -3635,9 +3650,11 @@ enum ChatScrollPolicy {
         followLatest: Bool,
         interaction: ChatScrollInteraction,
         isAtBottom: Bool,
-        hasPendingRestoration: Bool
+        hasPendingRestoration: Bool,
+        repinsForContentVersion: Int = 0
     ) -> Bool {
-        !isLoading
+        repinsForContentVersion < maximumRepinsPerContentVersion
+            && !isLoading
             && followLatest
             && interaction.allowsProgrammaticScroll
             && !isAtBottom

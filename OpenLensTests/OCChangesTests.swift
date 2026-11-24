@@ -33,10 +33,10 @@ struct OCChangesTests {
         let part = try JSONDecoder().decode(OCPart.self, from: Data(json.utf8))
         let files = OCFileSupport.fileChanges(of: part)
         #expect(files.count == 1)
-        #expect(files[0].path == "a/index.html")
-        #expect(files[0].additions == 1)
-        #expect(files[0].deletions == 1)
-        let hunks = UnifiedDiffBuilder.makeHunks(file: files[0])
+        #expect(files[0].file.path == "a/index.html")
+        #expect(files[0].file.additions == 1)
+        #expect(files[0].file.deletions == 1)
+        let hunks = UnifiedDiffBuilder.makeHunks(file: files[0].file)
         #expect(hunks.flatMap(\.lines).map(\.text) == ["keep", "old", "new"])
     }
 
@@ -48,9 +48,9 @@ struct OCChangesTests {
         let part = try JSONDecoder().decode(OCPart.self, from: Data(json.utf8))
         let files = OCFileSupport.fileChanges(of: part)
         #expect(files.count == 1)
-        #expect(files[0].status == "A")
-        #expect(files[0].additions == 2)
-        #expect(files[0].deletions == 0)
+        #expect(files[0].file.status == "A")
+        #expect(files[0].file.additions == 2)
+        #expect(files[0].file.deletions == 0)
     }
 
     @Test func unfinishedOrOtherToolsHaveNoCard() throws {
@@ -79,5 +79,54 @@ struct OCChangesTests {
         #expect(OCChangesMode.git.title == "Git changes")
         #expect(OCChangesMode.turn.title == "Last turn changes")
         #expect(OCChangesMode.git.emptyText == "No uncommitted changes yet")
+    }
+
+    @Test func editWithoutAServerPatchHasNoRealLineNumbers() throws {
+        let json = #"""
+        {"id":"p5","sessionID":"s","messageID":"m","type":"tool","tool":"edit","state":{"status":"completed",
+         "input":{"path":"a.txt","oldString":"x","newString":"y"}}}
+        """#
+        let part = try JSONDecoder().decode(OCPart.self, from: Data(json.utf8))
+        let files = OCFileSupport.fileChanges(of: part)
+        #expect(files.count == 1)
+        #expect(!files[0].hasRealLineNumbers)
+    }
+
+    @Test func aRunningEditBecomesACardWhenItCompletes() throws {
+        let running = #"{"id":"p6","sessionID":"s","messageID":"m","type":"tool","tool":"edit","state":{"status":"running","input":{"path":"a.txt","oldString":"x","newString":"y"}}}"#
+        let done = #"{"id":"p6","sessionID":"s","messageID":"m","type":"tool","tool":"edit","state":{"status":"completed","input":{"path":"a.txt","oldString":"x","newString":"y"}}}"#
+        #expect(OCFileSupport.fileChanges(of: try JSONDecoder().decode(OCPart.self, from: Data(running.utf8))).isEmpty)
+        #expect(OCFileSupport.fileChanges(of: try JSONDecoder().decode(OCPart.self, from: Data(done.utf8))).count == 1)
+    }
+
+    @Test func foldersCompareWithoutTrailingSlashesAndSubfoldersBelongToTheirRepo() {
+        #expect(OCFileSupport.sameFolder("/a/b/", "/a/b"))
+        #expect(!OCFileSupport.sameFolder("/a/b", "/a/c"))
+        #expect(!OCFileSupport.sameFolder(nil, "/a"))
+        #expect(OCFileSupport.isInside("/repo/sub/dir", root: "/repo"))
+        #expect(OCFileSupport.isInside("/repo", root: "/repo/"))
+        #expect(!OCFileSupport.isInside("/repository", root: "/repo"))
+    }
+
+    @Test func longLinesAreCutAndHugeFilesAreOnlyPartlySplit() {
+        let long = String(repeating: "x", count: 5000)
+        #expect(OCFileSupport.truncated(long).count == OCFileSupport.maximumLineCharacters + 1)
+        #expect(OCFileSupport.truncated("short") == "short")
+        let text = (1...10_000).map { "line \($0)" }.joined(separator: "\n")
+        let lines = OCFileSupport.cappedLines(text, maximumLines: 5000)
+        #expect(lines.count == 5000)
+        #expect(lines.last == "line 5000")
+    }
+
+    @Test func geometryRepinsStopAfterAFewForOneContentVersion() {
+        let limit = ChatScrollPolicy.maximumRepinsPerContentVersion
+        #expect(ChatScrollPolicy.shouldRepinToBottom(
+            isLoading: false, followLatest: true, interaction: .idle, isAtBottom: false,
+            hasPendingRestoration: false, repinsForContentVersion: limit - 1
+        ))
+        #expect(!ChatScrollPolicy.shouldRepinToBottom(
+            isLoading: false, followLatest: true, interaction: .idle, isAtBottom: false,
+            hasPendingRestoration: false, repinsForContentVersion: limit
+        ))
     }
 }

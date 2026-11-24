@@ -65,12 +65,15 @@ struct OCSessionView: View {
     private var panelBackground: Color { colorScheme == .dark ? Color.appSurface : Color.appBackground }
 
     var body: some View {
-        if let shell {
-            compact(shell)
-        } else {
-            // iPad / no shell: the plain chat with its normal navigation bar.
-            chat
+        Group {
+            if let shell {
+                compact(shell)
+            } else {
+                // iPad / no shell: the plain chat with its normal navigation bar.
+                chat
+            }
         }
+        .environment(\.ocSessionDirectory, current.directory)
     }
 
     private func compact(_ shell: OCShell) -> some View {
@@ -92,7 +95,6 @@ struct OCSessionView: View {
             .padding(.bottom, 4)
         }
         .environment(\.ocPanelBackground, panelBackground)
-        .environment(\.ocSessionDirectory, current.directory)
         .background(pageBackground.ignoresSafeArea())
         // The nav bar is hidden, so the system edge-swipe is gone: a leading-edge drag on this
         // screen only pops the chat (same as the back chevron / Tabs > Home).
@@ -268,7 +270,7 @@ struct OCSessionView: View {
             case .session:
                 EmptyView()
             case .changes:
-                OCChangesView(session: current) { path in
+                OCChangesView(session: current, refreshKey: chatClient.timelineVersion) { path in
                     if !filesOpen.contains(path) { filesOpen.append(path) }
                     filesActive = path
                     tab = .files

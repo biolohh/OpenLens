@@ -167,16 +167,24 @@ final class ReviewService {
             return OCChangesAvailability(isGit: true, modes: [.turn])
         }
         guard let client = connection.client else { throw OpenCodeError.notConnected }
+        // v1 servers have no working-tree diff route: only the newest turn can be shown.
+        guard connection.serverCapabilities?.protocolVersion == .v2 else {
+            return OCChangesAvailability(isGit: true, modes: [.turn])
+        }
         let projects = try await client.listProjects()
+        // The session's project by id, else the project whose folder holds the session's folder
+        // (the deepest one when they nest).
         let project = projects.first { projectID != nil && $0.id == projectID }
-            ?? projects.first { directory != nil && $0.worktree == directory }
+            ?? projects
+            .filter { OCFileSupport.isInside(directory, root: $0.worktree) }
+            .max { ($0.worktree?.count ?? 0) < ($1.worktree?.count ?? 0) }
         guard project?.vcs?.lowercased() == "git" else {
             return OCChangesAvailability(isGit: false, modes: [])
         }
         // The working tree is read through the client's active folder, so it is only
         // the session's own tree when the two agree.
         let context = await client.currentContextDirectory()
-        let sameFolder = directory == nil || context == directory
+        let sameFolder = directory == nil || OCFileSupport.sameFolder(context, directory)
         return OCChangesAvailability(isGit: true, modes: sameFolder ? [.git, .turn] : [.turn])
     }
 
@@ -191,6 +199,9 @@ final class ReviewService {
         case .git: diffs = try await client.getWorkingTreeDiff()
         case .turn: diffs = try await client.getSessionDiff(sessionID: sessionID)
         }
-        return diffs.map(ReviewFileChange.init(diff:))
+        // Patch parsing and line counting of big diffs stay off the main actor.
+        return await Task.detached(priority: .userInitiated) {
+            diffs.map { ReviewFileChange(diff: $0) }
+        }.value
     }
 }
