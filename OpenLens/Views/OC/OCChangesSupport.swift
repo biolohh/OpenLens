@@ -254,6 +254,7 @@ struct OCDiffBlock: View {
             Text(line.text.isEmpty ? " " : line.text)
                 .font(.openLensMono(size: 12))
                 .foregroundStyle(Color.appPrimary)
+                .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 10)
                 .padding(.trailing, 6)
