@@ -233,7 +233,9 @@ struct OCDiffBlock: View {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(lines) { line in row(line) }
             }
-            .accessibilityIdentifier("oc.diff")
+            .overlay(alignment: .topLeading) {
+                Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.diff")
+            }
         }
     }
 

@@ -316,6 +316,24 @@ final class OpenLensSmokeTests: XCTestCase {
                 app.swipeDown()
                 sleep(1)
             }
+            // Edit / Write rows are the web's file card; its chevron opens the diff inline.
+            var card = app.buttons["oc.fileCard"].firstMatch
+            if !card.exists {
+                // The Edit / Write may sit in a later "Used" group: open the others too.
+                let groups = app.buttons.matching(identifier: "oc.used")
+                for index in 1..<max(groups.count, 1) where groups.element(boundBy: index).exists {
+                    groups.element(boundBy: index).tap()
+                }
+                card = app.buttons["oc.fileCard"].firstMatch
+            }
+            if card.waitForExistence(timeout: 5) {
+                card.tap()
+                sleep(1)
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
+                    .waitForExistence(timeout: 8), "File card did not open its diff")
+                snapshot("03-chat-used-card-expanded")
+                card.tap()
+            }
             used.tap()
         }
 
@@ -335,9 +353,66 @@ final class OpenLensSmokeTests: XCTestCase {
         }
 
         app.buttons["oc.tab.changes"].tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.placeholder").firstMatch
-            .waitForExistence(timeout: 5), "Changes placeholder missing")
-        snapshot("03-chat-changes")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.changes").firstMatch
+            .waitForExistence(timeout: 8), "Changes tab missing")
+        sleep(3)
+        if app.descendants(matching: .any).matching(identifier: "oc.placeholder").firstMatch.exists {
+            snapshot("03-chat-changes-nogit")
+        } else {
+            // Same state as the web pair: the "Last turn changes" mode of a git project.
+            let mode = app.buttons["oc.changes.mode"]
+            if mode.waitForExistence(timeout: 5) {
+                mode.tap()
+                let turn = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label == %@ AND identifier != %@", "Last turn changes", "oc.changes.mode"))
+                    .firstMatch
+                if turn.waitForExistence(timeout: 4) { turn.tap() }
+            }
+            sleep(3)
+            snapshot("03-chat-changes")
+            let file = app.buttons["oc.changes.file"].firstMatch
+            if file.waitForExistence(timeout: 5) {
+                app.buttons["oc.changes.expandAll"].tap()
+                sleep(2)
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
+                    .waitForExistence(timeout: 8), "Expand all did not show a diff")
+                snapshot("03-chat-changes-expanded")
+                let open = app.buttons["oc.changes.openFile"].firstMatch
+                if open.waitForExistence(timeout: 3) {
+                    open.tap()
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.content").firstMatch
+                        .waitForExistence(timeout: 8), "Open file did not show the file")
+                    snapshot("03-chat-changes-open-file")
+                }
+            }
+        }
+        app.buttons["oc.tab.session"].tap()
+
+        // Files (More... > Files): the project tree, then one file.
+        app.buttons["oc.tab.more"].tap()
+        XCTAssertTrue(app.buttons["oc.more.files"].waitForExistence(timeout: 5), "More sheet missing Files")
+        app.buttons["oc.more.files"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.files").firstMatch
+            .waitForExistence(timeout: 8), "Files view missing")
+        sleep(1)
+        let allFiles = app.buttons["oc.files.all"]
+        if allFiles.exists { allFiles.tap() }
+        XCTAssertTrue(app.buttons["oc.files.row"].firstMatch.waitForExistence(timeout: 10), "File tree is empty")
+        snapshot("03-chat-files")
+        let rows = app.buttons.matching(identifier: "oc.files.row")
+        let folder = rows.matching(NSPredicate(format: "value == 'collapsed'")).firstMatch
+        if folder.exists {
+            folder.tap()
+            sleep(2)
+            snapshot("03-chat-files-expanded")
+        }
+        let fileRow = rows.matching(NSPredicate(format: "value == ''")).firstMatch
+        if fileRow.exists {
+            fileRow.tap()
+            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.content").firstMatch
+                .waitForExistence(timeout: 8), "Tapping a file did not open it")
+            snapshot("03-chat-files-file")
+        }
         app.buttons["oc.tab.session"].tap()
 
         app.buttons["oc.tab.more"].tap()

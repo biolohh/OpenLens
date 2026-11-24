@@ -16,7 +16,7 @@ struct OCFilesView: View {
                 OCFileTextView(directory: directory, path: activePath)
                     .id(activePath)
             } else {
-                OCFileTree(directory: directory) { path in
+                OCFileTree(directory: directory, openPaths: openPaths) { path in
                     if !openPaths.contains(path) { openPaths.append(path) }
                     activePath = path
                 }
@@ -79,6 +79,8 @@ struct OCFilesView: View {
 /// Expandable tree of the session's folder; children load when a folder is first opened.
 private struct OCFileTree: View {
     let directory: String?
+    /// Files already open as tabs; their rows carry the web's grey highlight.
+    let openPaths: [String]
     let onOpen: (String) -> Void
 
     @Environment(\.workspaceService) private var workspaceService
@@ -211,9 +213,14 @@ private struct OCFileTree: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.leading, 12 + CGFloat(depth) * 16)
-            .padding(.trailing, 12)
+            .padding(.leading, 8 + CGFloat(depth) * 16)
+            .padding(.trailing, 8)
             .frame(height: 28)
+            .background(
+                openPaths.contains(entry.path) ? Color.appTertiary : .clear,
+                in: RoundedRectangle(cornerRadius: 6, style: .continuous)
+            )
+            .padding(.horizontal, 4)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -306,7 +313,9 @@ private struct OCFileTextView: View {
                     }
                     .padding(.vertical, 6)
                 }
-                .accessibilityIdentifier("oc.file.content")
+                .overlay(alignment: .topLeading) {
+                    Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.file.content")
+                }
             }
         }
         .task(id: path) { await load() }
