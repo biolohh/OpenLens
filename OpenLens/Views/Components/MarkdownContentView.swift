@@ -520,7 +520,8 @@ private struct MarkdownInlineText: View {
                 Text(fallback)
             }
         }
-        .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 17))
+        .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 14))
+        .lineSpacing(usesRetroTypography ? 0 : 5.4)
         .foregroundStyle(foregroundColor)
     }
 }
@@ -551,7 +552,7 @@ private struct MarkdownListBlockView: View {
             ForEach(fragments.prefix(shownFragmentCount)) { fragment in
                 HStack(alignment: .top, spacing: 6) {
                     Text(fragment.marker ?? "")
-                        .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 17))
+                        .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 14))
                         .foregroundStyle(.secondary)
                         .frame(width: 20, alignment: .trailing)
 
@@ -766,7 +767,7 @@ struct DeferredMarkdownTextView: View {
             // Match MarkdownInlineText so short replies keep their height
             // when the parsed document replaces this preview.
             Text(fallbackPreview)
-                .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 17))
+                .font(usesRetroTypography ? RetroChatStyle.bodyFont : .system(size: 14))
                 .foregroundStyle(foregroundColor)
 
             if fallbackIsTruncated {

@@ -132,7 +132,7 @@ struct MessageBubbleView: View {
             }
             if !message.content.isEmpty || (message.imageAttachments.isEmpty && message.fileAttachments.isEmpty) {
                 SkillMentionText(text: message.content, chipStyle: isRetroChat ? .retro : .standard(.appOnUserBubble))
-                    .font(isRetroChat ? RetroChatStyle.bodyFont : theme.typography.body)
+                    .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: 14))
                     .foregroundStyle(isRetroChat ? RetroChatStyle.ink : Color.appOnUserBubble)
                     .padding(.horizontal, isRetroChat ? 14 : 16)
                     .padding(.vertical, isRetroChat ? 10 : 11)
@@ -240,12 +240,13 @@ struct MessageBubbleView: View {
             if let projection, message.isStreaming {
                 StreamingAssistantTextView(
                     projection: projection,
-                    font: isRetroChat ? RetroChatStyle.bodyFont : .system(size: 16),
+                    font: isRetroChat ? RetroChatStyle.bodyFont : .system(size: 14),
                     color: isRetroChat ? RetroChatStyle.ink : Color.appPrimary
                 )
             } else if message.isStreaming {
                 Text(text)
-                    .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: 16))
+                    .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: 14))
+                    .lineSpacing(isRetroChat ? 0 : 5.4)
                     .foregroundStyle(isRetroChat ? RetroChatStyle.ink : Color.appPrimary)
             } else {
                 DeferredMarkdownTextView(
@@ -328,7 +329,7 @@ struct MessageBubbleView: View {
     private func streamingTextBubble(_ projection: ChatMessage.StreamingTextProjection) -> some View {
         StreamingAssistantTextView(
             projection: projection,
-            font: isRetroChat ? RetroChatStyle.bodyFont : .system(size: 16),
+            font: isRetroChat ? RetroChatStyle.bodyFont : .system(size: 14),
             color: isRetroChat ? RetroChatStyle.ink : Color.appPrimary
         )
         .padding(.horizontal, showsTranscriptStyleAssistantContent ? 0 : 16)
@@ -1409,6 +1410,7 @@ private struct SealedStreamingTextChunks: View {
         ForEach(liveWindow.sealedChunks) { chunk in
             Text(chunk.text)
                 .font(font)
+                .lineSpacing(5.4)
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -1424,6 +1426,7 @@ private struct StreamingTextTail: View {
         if !projection.tail.isEmpty {
             Text(projection.tail)
                 .font(font)
+                .lineSpacing(5.4)
                 .foregroundStyle(color)
                 .fixedSize(horizontal: false, vertical: true)
         }
