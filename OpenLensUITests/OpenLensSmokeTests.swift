@@ -124,7 +124,8 @@ final class OpenLensSmokeTests: XCTestCase {
     /// the answer and deletes the session (context menu on Home). Skipped when the sheet has no
     /// usable workspace, so a server without a default project does not fail the whole run.
     private func throwawayComposerRoundTrip(in app: XCUIApplication, home: XCUIElement) throws {
-        let title = "zz-smoke-composer"
+        // Unique per run so a leftover from an aborted run can never be mistaken for this one.
+        let title = "zz-smoke-composer-\(UUID().uuidString.prefix(6))"
         app.buttons["oc.newSession"].tap()
         XCTAssertTrue(app.navigationBars["New Session"].waitForExistence(timeout: 10), "New session sheet did not open")
         let titleField = app.textFields["Title (optional)"]
@@ -153,6 +154,18 @@ final class OpenLensSmokeTests: XCTestCase {
 
         let field = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
         field.tap()
+        // "/" opens the command list, "@" the context picker with the repository files.
+        field.typeText("/")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.slashPicker").firstMatch
+            .waitForExistence(timeout: 8), "Slash command picker did not open")
+        snapshot("03e2-composer-slash")
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
+        field.typeText("@")
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.mentionPicker").firstMatch
+            .waitForExistence(timeout: 8), "@ context picker did not open")
+        XCTAssertTrue(app.buttons["Repository File"].exists, "@ picker has no repository file row")
+        snapshot("03e3-composer-mention")
+        field.typeText(XCUIKeyboardKey.delete.rawValue)
         field.typeText("Reply with the single word ok.")
         snapshot("03f-composer-typed")
         let send = app.buttons["Send"]
@@ -161,28 +174,38 @@ final class OpenLensSmokeTests: XCTestCase {
         let stop = app.buttons["Stop"]
         _ = stop.waitForExistence(timeout: 15)
         let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: stop)
-        XCTAssertEqual(XCTWaiter().wait(for: [finished], timeout: 120), .completed, "Answer did not finish")
+        XCTAssertEqual(XCTWaiter().wait(for: [finished], timeout: 240), .completed, "Answer did not finish in 240 s")
         sleep(2)
         snapshot("03g-composer-answered")
 
-        // Back to Home through the leading edge swipe, then delete the throw-away session.
+        // Back to Home (edge swipe, else the Tabs sheet), then delete every zz-smoke-composer*
+        // session: this run's and any leftover of an aborted one.
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.003, dy: 0.5))
         edge.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        if !app.buttons["oc.projectPicker"].waitForExistence(timeout: 8) {
+            app.buttons["oc.menu"].firstMatch.tap()
+            let homeRow = app.buttons["oc.menu.chat"]
+            if homeRow.waitForExistence(timeout: 5) { homeRow.tap() }
+        }
         XCTAssertTrue(app.buttons["oc.projectPicker"].waitForExistence(timeout: 8), "Did not return to Home")
-        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
-        if row.waitForExistence(timeout: 10) {
+        let prefix = "zz-smoke-composer"
+        let rows = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", prefix))
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10), "Throw-away session not listed on Home")
+        var deleted = 0
+        while rows.firstMatch.exists, deleted < 6 {
+            let row = rows.firstMatch
             row.press(forDuration: 1.2)
             let delete = app.buttons["Delete"]
-            if delete.waitForExistence(timeout: 5) {
-                delete.tap()
-                let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Delete", title)).firstMatch
-                if confirm.waitForExistence(timeout: 5) { confirm.tap() }
-            }
-            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
-                .waitForExistence(timeout: 5), "Throw-away session was not deleted")
-        } else {
-            XCTFail("Throw-away session not listed on Home")
+            guard delete.waitForExistence(timeout: 5) else { break }
+            delete.tap()
+            let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Delete", prefix)).firstMatch
+            guard confirm.waitForExistence(timeout: 5) else { break }
+            confirm.tap()
+            deleted += 1
+            sleep(2)
         }
+        XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", prefix)).firstMatch
+            .waitForExistence(timeout: 5), "Throw-away session(s) were not deleted")
         XCTAssertTrue(home.waitForExistence(timeout: 10), "Home missing after cleanup")
     }
 
