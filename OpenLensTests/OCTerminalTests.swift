@@ -121,6 +121,31 @@ struct OCTerminalEmulatorTests {
         #expect(term.lines(showCursor: false)[0].runs[0].style == .plain)
     }
 
+    @Test func checkpointRestoreDoesNotDuplicateTheHistory() {
+        let output = (1...50).map(String.init).joined(separator: "\r\n") + "\r\n$ "
+        var term = OCTerminalEmulator(cols: 20, rows: 10)
+        term.feed(output)
+        let before = term.historyCount
+        #expect(before == 41)
+        // The server's checkpoint carries the scrollback too; a resize sends it again each time.
+        term.restore(cols: 20, rows: 10, checkpoint: Data(output.utf8))
+        term.restore(cols: 18, rows: 10, checkpoint: Data(output.utf8))
+        #expect(term.historyCount == before)
+        #expect(term.screenText.last == "$")
+        let ids = term.lines(showCursor: false).map(\.id)
+        #expect(Set(ids).count == ids.count)
+        #expect(ids.first! > 41)
+    }
+
+    @Test func eraseScrollbackClearsTheHistoryOnly() {
+        var term = OCTerminalEmulator(cols: 10, rows: 2)
+        term.feed("a\r\nb\r\nc")
+        #expect(term.historyCount == 1)
+        term.feed("\u{1b}[3J")
+        #expect(term.historyCount == 0)
+        #expect(term.screenText == ["b", "c"])
+    }
+
     @Test func cursorCellIsMarkedWhenShown() {
         var term = OCTerminalEmulator(cols: 10, rows: 1)
         term.feed("ab")

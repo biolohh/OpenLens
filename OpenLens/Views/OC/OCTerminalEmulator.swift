@@ -160,9 +160,11 @@ nonisolated struct OCTerminalEmulator {
         wrapPending = false
     }
 
-    /// RIS: clears the screen and modes; the history stays.
-    mutating func reset() {
+    /// RIS: clears the screen and modes; the history stays unless `clearHistory`.
+    /// Line ids keep counting up either way, so the view never sees an id twice.
+    mutating func reset(clearHistory: Bool = false) {
         if mainScreen != nil { exitAlternateScreen() }
+        if clearHistory { history.removeAll() }
         screen = Array(repeating: Array(repeating: Cell(), count: cols), count: rows)
         cursorX = 0
         cursorY = 0
@@ -178,6 +180,14 @@ nonisolated struct OCTerminalEmulator {
         state = .ground
         utf8 = []
         utf8Needed = 0
+    }
+
+    /// The server's canonical state: its checkpoint redraws the screen *and* the scrollback, so
+    /// the history is cleared first (the web writes RIS + checkpoint into a fresh xterm).
+    mutating func restore(cols: Int, rows: Int, checkpoint: Data) {
+        reset(clearHistory: true)
+        resize(cols: cols, rows: rows)
+        feed(checkpoint)
     }
 
     mutating func feed(_ data: Data) {
@@ -560,8 +570,10 @@ nonisolated struct OCTerminalEmulator {
         case 1:
             eraseLine(1)
             for row in 0..<cursorY { screen[row] = blankRow() }
-        case 2, 3:
+        case 2:
             for row in 0..<rows { screen[row] = blankRow() }
+        case 3: // `clear` sends it: drop the scrollback
+            history.removeAll()
         default:
             break
         }
@@ -774,9 +786,13 @@ nonisolated final class OCTerminalEngine: @unchecked Sendable {
     /// A canonical size from the server, optionally after a reset and with a checkpoint redrawing the screen.
     func resize(cols: Int, rows: Int, reset: Bool = false, checkpoint: Data? = nil) {
         queue.async { [self] in
-            if reset { emulator.reset() }
-            emulator.resize(cols: cols, rows: rows)
-            if let checkpoint { emulator.feed(checkpoint) }
+            if reset, let checkpoint {
+                emulator.restore(cols: cols, rows: rows, checkpoint: checkpoint)
+            } else {
+                if reset { emulator.reset() }
+                emulator.resize(cols: cols, rows: rows)
+                if let checkpoint { emulator.feed(checkpoint) }
+            }
             schedule()
         }
     }
