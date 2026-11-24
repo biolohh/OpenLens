@@ -361,10 +361,10 @@ final class OpenLensSmokeTests: XCTestCase {
             snapshot("03-chat-changes-nogit")
         } else {
             // Same state as the web pair: the "Last turn changes" mode of a git project.
-            let mode = app.buttons["oc.changes.mode"]
+            let mode = app.descendants(matching: .any).matching(identifier: "oc.changes.mode").firstMatch
             if mode.waitForExistence(timeout: 5) {
                 mode.tap()
-                let turn = app.buttons["oc.changes.mode.turn"]
+                let turn = app.descendants(matching: .any).matching(identifier: "oc.changes.mode.turn").firstMatch
                 XCTAssertTrue(turn.waitForExistence(timeout: 4), "Mode panel did not open")
                 snapshot("03-chat-changes-modes")
                 turn.tap()
