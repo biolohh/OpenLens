@@ -364,10 +364,15 @@ final class OCTerminalStore {
     /// Ends the terminal on the server (the tab's close button), then shows its neighbour.
     func close(_ id: String) async {
         guard let client else { return }
+        // Detach first: the server ends the socket before it answers the DELETE, which would
+        // otherwise flash "Terminal disconnected".
+        let closingActive = activeID == id
+        if closingActive { connection?.disconnect() }
         do {
             try await client.remove(ptyID: id)
         } catch {
             actionError = OCTerminalText.closeFailed
+            if closingActive { connection?.start() }
             return
         }
         let index = terminals.firstIndex { $0.id == id }
