@@ -27,6 +27,7 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.appSeparator, lineWidth: 1)
         )
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("oc.composer")
     }
 
@@ -104,6 +105,7 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
                 Text(chatClient.selectedModelDisplayName)
                     .foregroundStyle(Color.appPrimary.opacity(0.85))
                     .lineLimit(1)
+                    .layoutPriority(1)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 9, weight: .semibold))
                     .foregroundStyle(Color.appSecondary)
