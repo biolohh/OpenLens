@@ -467,6 +467,18 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal").firstMatch
             .waitForExistence(timeout: 8), "Terminal view missing")
         XCTAssertTrue(app.buttons["oc.terminal.tab"].firstMatch.waitForExistence(timeout: 15), "No terminal tab")
+        // Type only into a terminal this run created: a terminal that already existed may be
+        // someone's, in another folder or inside a program. If the app reused one, open a new one.
+        let ownSelected = app.buttons.matching(NSPredicate(
+            format: "identifier == 'oc.terminal.tab' AND value == 'new' AND selected == true"
+        )).firstMatch
+        if !ownSelected.waitForExistence(timeout: 3) {
+            app.buttons["oc.terminal.new"].tap()
+        }
+        guard ownSelected.waitForExistence(timeout: 15) else {
+            XCTFail("No terminal created by this run is selected; not typing into someone else's terminal")
+            return
+        }
         // The prompt is on screen once the replay arrived.
         let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '$'")).firstMatch
         XCTAssertTrue(prompt.waitForExistence(timeout: 15), "No shell prompt in the terminal")
