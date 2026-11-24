@@ -52,6 +52,8 @@ struct OCSessionView: View {
     @State private var filesActive: String?
     /// Chosen in the More sheet; run once the sheet has finished dismissing.
     @State private var pendingMoreAction: (() -> Void)?
+    /// Terminal tab: the session's terminals and live attachment, kept across tab switches.
+    @State private var terminal: OCTerminalStore?
 
     /// The session as the server last reported it (title edits), else the pushed snapshot.
     private var current: OCSession {
@@ -117,7 +119,13 @@ struct OCSessionView: View {
             OCSessionMoreSheet(
                 chatClient: chatClient,
                 files: { tab = .files },
-                terminal: { tab = .terminal },
+                terminal: {
+                    // Created on first use; a new session gets a new store (see onChange(of: session.id)).
+                    if terminal?.sessionID != current.id {
+                        terminal = OCTerminalStore(sessionID: current.id, directory: current.directory)
+                    }
+                    tab = .terminal
+                },
                 usage: { router?.navigate(to: .sessionInsights(sessionID: session.id)) },
                 details: { showDetails = true },
                 choose: { pendingMoreAction = $0 }
@@ -132,7 +140,11 @@ struct OCSessionView: View {
             tab = .session
             filesOpen = []
             filesActive = nil
+            // Detach only: the terminals keep running on the server, as on the web.
+            terminal?.disconnect()
+            terminal = nil
         }
+        .onDisappear { terminal?.disconnect() }
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.session")
         }
@@ -278,7 +290,9 @@ struct OCSessionView: View {
             case .files:
                 OCFilesView(directory: current.directory, openPaths: $filesOpen, activePath: $filesActive)
             case .terminal:
-                OCPlaceholder(icon: "terminal", title: AppText.ocTabTerminal, subtitle: AppText.ocComingSoon)
+                if let terminal {
+                    OCTerminalView(store: terminal)
+                }
             }
         }
     }
