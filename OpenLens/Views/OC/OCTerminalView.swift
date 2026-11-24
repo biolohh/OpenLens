@@ -287,7 +287,7 @@ private struct OCTerminalRow: View, Equatable {
             }
             part.foregroundColor = style.dim ? foreground.opacity(0.6) : foreground
             if let background { part.backgroundColor = background }
-            var font = Font.openLensMono(size: metrics.fontSize, weight: style.bold ? .bold : .regular)
+            var font = style.bold ? metrics.bold : metrics.regular
             if style.italic { font = font.italic() }
             part.font = font
             if style.underline { part.underlineStyle = Text.LineStyle.single }
@@ -295,7 +295,7 @@ private struct OCTerminalRow: View, Equatable {
         }
         if result.characters.isEmpty {
             result = AttributedString(" ")
-            result.font = Font.openLensMono(size: metrics.fontSize)
+            result.font = metrics.regular
         }
         return result
     }
@@ -307,11 +307,25 @@ struct OCTerminalMetrics: Equatable {
     let cellWidth: CGFloat
     let lineHeight: CGFloat
 
+    /// The theme's mono fonts, resolved once (not per row per screen update).
+    let regular: Font
+    let bold: Font
+
+    private static var cache: [String: OCTerminalMetrics] = [:]
+
+    /// Measured once per theme font and size, then cached.
     static func current(size: CGFloat) -> OCTerminalMetrics {
         let family = OpenLensDesignSystem.currentTheme.typography.monoFamily
+        let key = "\(family ?? "system")/\(size)"
+        if let cached = cache[key] { return cached }
         let font = family.flatMap { UIFont(name: $0, size: size) } ?? .monospacedSystemFont(ofSize: size, weight: .regular)
         let width = ("W" as NSString).size(withAttributes: [.font: font]).width
-        return OCTerminalMetrics(fontSize: size, cellWidth: max(1, width), lineHeight: ceil(font.lineHeight))
+        let metrics = OCTerminalMetrics(
+            fontSize: size, cellWidth: max(1, width), lineHeight: ceil(font.lineHeight),
+            regular: .openLensMono(size: size), bold: .openLensMono(size: size, weight: .bold)
+        )
+        cache[key] = metrics
+        return metrics
     }
 
     func cells(in size: CGSize) -> (cols: Int, rows: Int) {
