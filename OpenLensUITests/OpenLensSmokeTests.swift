@@ -276,6 +276,8 @@ final class OpenLensSmokeTests: XCTestCase {
             let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.003, dy: 0.5))
             edge.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
             XCTAssertTrue(app.buttons["oc.projectPicker"].waitForExistence(timeout: 6), "Edge swipe did not return to Home")
+            // Back to the top of the list: the later Home steps expect the header row.
+            for _ in 0..<(scrolls + 1) { app.swipeDown() }
             return
         }
         let composer = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
