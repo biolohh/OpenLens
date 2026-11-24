@@ -20,6 +20,7 @@ extension AppText {
     static let ocFilesNoResults = "No results"
     static let ocFileNotText = "This file can't be shown as text."
     static let ocFileCloseTab = "Close file"
+    static let ocShowFullDiff = "Show full diff"
     static let ocNoDiff = "No line-level diff available."
 }
 
@@ -200,6 +201,8 @@ struct OCDiffCounts: View {
 struct OCDiffBlock: View {
     let file: ReviewFileChange
     var maximumLines = 400
+    /// Reports how many diff lines exist (the card shows "Show all" when it clips).
+    var onLineCount: (Int) -> Void = { _ in }
 
     @State private var hunks: [UnifiedDiffHunk]?
 
@@ -214,9 +217,11 @@ struct OCDiffBlock: View {
         }
         .task(id: file) {
             let file = file
-            hunks = await Task.detached(priority: .userInitiated) {
+            let built = await Task.detached(priority: .userInitiated) {
                 UnifiedDiffBuilder.makeHunks(file: file)
             }.value
+            hunks = built
+            onLineCount(built.reduce(0) { $0 + $1.lines.count })
         }
     }
 
@@ -310,12 +315,18 @@ struct OCFileCard: View {
 
     @Environment(\.ocSessionDirectory) private var directory
     @State private var open = false
+    @State private var showsAll = false
+    @State private var lineCount = 0
+
+    /// Rows shown inline; the rest opens in a sheet. A nested scroll view inside the lazy
+    /// transcript froze the main thread, so the inline diff is clipped, not scrolled.
+    private static let inlineLines = 30
 
     var body: some View {
         let path = OCFileSupport.relative(file.path, to: directory)
         VStack(spacing: 0) {
             Button {
-                withAnimation(.easeOut(duration: 0.16)) { open.toggle() }
+                open.toggle()
             } label: {
                 HStack(spacing: 8) {
                     OCFileTypeIcon(name: OCFileSupport.split(path: path).name)
@@ -337,9 +348,27 @@ struct OCFileCard: View {
 
             if open {
                 Rectangle().fill(Color.appSeparator).frame(height: 1)
-                ScrollView { OCDiffBlock(file: file) }
-                    .frame(height: 250)
+                OCDiffBlock(file: file, maximumLines: Self.inlineLines) { lineCount = $0 }
+                    .frame(maxHeight: 250, alignment: .top)
+                    .clipped()
+                if lineCount > Self.inlineLines || lineCount == 0 {
+                    Button { showsAll = true } label: {
+                        Text(AppText.ocShowFullDiff)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(Color.appPrimary)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("oc.fileCard.showAll")
+                }
             }
+        }
+        .sheet(isPresented: $showsAll) {
+            ScrollView { OCDiffBlock(file: file) }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationBackground(Color.appBackground)
         }
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appSeparator, lineWidth: 1)
