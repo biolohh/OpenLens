@@ -837,8 +837,19 @@ final class ChatClient: SSEEventHandlerDelegate {
 
     var displayedMessages: [ChatMessage] = []
 
+    /// Items actually shown after the window was extended back to a user message.
+    private var effectiveDisplayLimit: Int = 15
+
     var hasEarlierMessages: Bool {
-        messages.count + contextEntries.count > displayLimit
+        messages.count + contextEntries.count > max(displayLimit, effectiveDisplayLimit)
+    }
+
+    /// First index of the window: `limit` items from the end, moved back to the nearest user
+    /// message so the first visible turn starts with its user bubble (web behaviour).
+    private func windowStart(in messages: [ChatMessage], limit: Int) -> Int {
+        var start = max(messages.count - limit, 0)
+        while start > 0, messages[start].role != .user { start -= 1 }
+        return start
     }
 
     func loadEarlierMessages() {
@@ -863,7 +874,9 @@ final class ChatClient: SSEEventHandlerDelegate {
         }
         var result: [ChatMessage]
         if contextEntries.isEmpty {
-            result = messages.count <= displayLimit ? messages : Array(messages.suffix(displayLimit))
+            let start = windowStart(in: messages, limit: displayLimit)
+            result = start == 0 ? messages : Array(messages[start...])
+            effectiveDisplayLimit = result.count
             displayedContextEntries = []
             displayedEntryOrder = []
         } else {
