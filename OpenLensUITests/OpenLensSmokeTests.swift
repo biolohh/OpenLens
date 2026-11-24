@@ -313,8 +313,7 @@ final class OpenLensSmokeTests: XCTestCase {
                 line.tap()
                 sleep(1)
                 snapshot("03-chat-tool-line-open")
-                app.swipeDown()
-                sleep(1)
+                dismissSheet(in: app, marker: "oc.toolDetail")
             }
             // Edit / Write rows are the web's file card; its chevron opens the diff inline.
             var card = app.buttons["oc.fileCard"].firstMatch
@@ -448,6 +447,23 @@ final class OpenLensSmokeTests: XCTestCase {
         let buttons = alert.buttons
         // The confirm button is the last one ("Open" / "Megnyitás").
         buttons.element(boundBy: buttons.count - 1).tap()
+    }
+
+    /// Closes a sheet reliably: drags it from its grabber, then taps the dimmed area, until its
+    /// marker is gone (a plain swipe sometimes leaves the sheet up and swallows the next tap).
+    private func dismissSheet(in app: XCUIApplication, marker: String) {
+        let probe = app.descendants(matching: .any).matching(identifier: marker).firstMatch
+        for attempt in 0..<4 {
+            sleep(1)
+            guard probe.exists else { return }
+            if attempt % 2 == 0 {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.48))
+                    .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.99)))
+            } else {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12)).tap()
+            }
+        }
+        XCTAssertFalse(probe.exists, "Sheet \(marker) did not close")
     }
 
     /// `ChatStreamInstrumentation.scrollToBottomCount`, read from the debug overlay.
