@@ -49,6 +49,12 @@ actor OpenCodeClient {
         contextDirectory
     }
 
+    /// Base URL and Authorization header of the connected server, for clients that open their
+    /// own connections with the same credentials (the Terminal tab's PTY WebSocket).
+    func connectionEndpoint() -> (baseURL: URL, authHeader: String?) {
+        (baseURL, authHeader)
+    }
+
     // MARK: - Health
 
     func checkHealth() async throws -> OCHealthResponse {
