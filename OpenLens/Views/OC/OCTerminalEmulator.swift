@@ -54,6 +54,8 @@ nonisolated struct OCTerminalEmulator {
         /// ESC followed by an intermediate ( ) * + # %: the next byte is consumed.
         case escapeIntermediate
         case csi
+        /// A CSI sequence whose parameters grew past `maxParams`: skipped up to its final byte.
+        case csiIgnore
         case osc
         case oscEscape
         /// DCS / SOS / PM / APC: ignored until ST.
@@ -202,8 +204,16 @@ nonisolated struct OCTerminalEmulator {
                 state = .ground
             } else if byte < 0x20 {
                 control(byte)
+            } else if params.utf8.count >= Self.maxParams {
+                state = .csiIgnore
             } else {
                 params.unicodeScalars.append(UnicodeScalar(byte))
+            }
+        case .csiIgnore:
+            if byte >= 0x40 && byte <= 0x7e || byte == 0x18 || byte == 0x1a {
+                state = .ground
+            } else if byte == 0x1b {
+                state = .escape
             }
         case .osc:
             if byte == 0x07 {
@@ -443,8 +453,9 @@ nonisolated struct OCTerminalEmulator {
             if final == 0x70, raw.hasSuffix("!") { reset() } // DECSTR
             return
         }
+        // Clamped, so cursor arithmetic on a huge parameter (`ESC [ 9223372036854775807 C`) can't overflow.
         let values = raw.split(separator: ";", omittingEmptySubsequences: false).map { part -> Int in
-            Int(part.split(separator: ":").first ?? "") ?? 0
+            Self.clampParameter(Int(part.split(separator: ":").first ?? "") ?? 0)
         }
         func arg(_ index: Int, _ fallback: Int = 1) -> Int {
             index < values.count && values[index] > 0 ? values[index] : fallback
@@ -679,6 +690,13 @@ nonisolated struct OCTerminalEmulator {
     }
 
     // MARK: Helpers
+
+    /// Longest CSI parameter string kept; a longer sequence is dropped.
+    static let maxParams = 256
+
+    static func clampParameter(_ value: Int) -> Int {
+        min(max(0, value), 65535)
+    }
 
     private static func defaultTabStops(cols: Int) -> Set<Int> {
         Set(stride(from: 8, to: cols, by: 8))

@@ -102,6 +102,25 @@ struct OCTerminalEmulatorTests {
         #expect(term.historyCount == 2)
     }
 
+    @Test func hugeCSIParametersClampInsteadOfTrapping() {
+        var term = OCTerminalEmulator(cols: 20, rows: 5)
+        term.feed("ab\r\n")
+        term.feed("x\u{1b}[9223372036854775807C")
+        #expect(term.cursorX == 19)
+        term.feed("\u{1b}[9223372036854775807B\u{1b}[9223372036854775807E\u{1b}[9223372036854775807X")
+        #expect(term.cursorY == 4)
+        // Past Int: unparsable, so the default of 1 applies.
+        term.feed("\u{1b}[99999999999999999999999A")
+        #expect(term.cursorY == 3)
+    }
+
+    @Test func overlongCSISequenceIsDroppedWhole() {
+        var term = OCTerminalEmulator(cols: 20, rows: 2)
+        term.feed("\u{1b}[" + String(repeating: "1;", count: 400) + "mok")
+        #expect(term.screenText[0] == "ok")
+        #expect(term.lines(showCursor: false)[0].runs[0].style == .plain)
+    }
+
     @Test func cursorCellIsMarkedWhenShown() {
         var term = OCTerminalEmulator(cols: 10, rows: 1)
         term.feed("ab")
