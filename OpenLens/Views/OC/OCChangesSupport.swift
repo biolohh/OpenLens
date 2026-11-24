@@ -125,7 +125,9 @@ enum OCFileSupport {
         let path = (input["path"] as? String) ?? (input["filePath"] as? String)
         guard let path else { return [] }
         if tool == "write", let content = input["content"] as? String {
-            return [ReviewFileChange(diff: OCFileDiff(file: path, status: "A", after: content))]
+            var lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.last == "" { lines.removeLast() }
+            return [ReviewFileChange(diff: OCFileDiff(file: path, status: "A", additions: lines.count, deletions: 0, after: content))]
         }
         if tool == "edit", let old = input["oldString"] as? String, let new = input["newString"] as? String {
             return [ReviewFileChange(diff: OCFileDiff(file: path, before: old, after: new))]

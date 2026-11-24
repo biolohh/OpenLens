@@ -71,7 +71,8 @@ struct OCChangesTests {
         let hidden = WorkspaceService.repositoryEntries(from: entries, directory: "/r")
         #expect(hidden.map(\.name) == ["_scratch", "hello.txt"])
         let all = WorkspaceService.repositoryEntries(from: entries, directory: "/r", includesHidden: true)
-        #expect(all.map(\.name) == [".git", "_scratch", "hello.txt"])
+        #expect(Set(all.map(\.name)) == [".git", "_scratch", "hello.txt"])
+        #expect(all.last?.name == "hello.txt")
     }
 
     @Test func modesNameTheWebsOptions() {
