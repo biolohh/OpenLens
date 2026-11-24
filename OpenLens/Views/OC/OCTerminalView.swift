@@ -115,7 +115,7 @@ struct OCTerminalView: View {
                 Text(text)
                     .font(.system(size: 14))
                     .foregroundStyle(Color.appSecondary)
-                Button(OCTerminalText.retry) { Task { await store.load() } }
+                Button(OCTerminalText.retry) { Task { await store.reload() } }
                     .font(.system(size: 13, weight: .medium))
                     .accessibilityIdentifier("oc.terminal.retry")
             }

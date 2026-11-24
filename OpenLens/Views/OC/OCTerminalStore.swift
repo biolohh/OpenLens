@@ -269,6 +269,7 @@ final class OCTerminalStore {
 
     @ObservationIgnored private var client: OCTerminalClient?
     @ObservationIgnored private var loadedOnce = false
+    @ObservationIgnored private var loadTask: Task<Void, Never>?
 
     init(sessionID: String, directory: String?) {
         self.sessionID = sessionID
@@ -290,10 +291,24 @@ final class OCTerminalStore {
             if let connection, case .failed = connection.status { connection.reconnect() } else { connection?.start() }
             return
         }
-        await load()
+        await reload()
     }
 
-    func load() async {
+    /// Lists (and on the first visit seeds) in a task the store owns: leaving the tab cancels the
+    /// view's task, but a create already sent must still land in `terminals`, never as a hidden
+    /// terminal on the server.
+    func reload() async {
+        if let loadTask {
+            await loadTask.value
+            return
+        }
+        let task = Task { await self.load() }
+        loadTask = task
+        await task.value
+        loadTask = nil
+    }
+
+    private func load() async {
         guard let client else { return }
         phase = .loading
         do {
