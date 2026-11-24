@@ -127,7 +127,7 @@ final class OpenLensSmokeTests: XCTestCase {
         let title = "zz-smoke-composer"
         app.buttons["oc.newSession"].tap()
         XCTAssertTrue(app.navigationBars["New Session"].waitForExistence(timeout: 10), "New session sheet did not open")
-        let titleField = app.textFields.firstMatch
+        let titleField = app.textFields["Title (optional)"]
         XCTAssertTrue(titleField.waitForExistence(timeout: 5), "No title field")
         titleField.tap()
         titleField.typeText(title)
