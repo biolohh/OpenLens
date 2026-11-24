@@ -3725,8 +3725,10 @@ struct ChatStreamBehaviorTests {
             )
         }
 
-        #expect(client.displayedMessages.count == 15)
-        #expect(client.displayedMessages.first?.id == "message-25")
+        // The 15-message window starts at message 25 (assistant); it is extended back to the
+        // nearest user message (24) so the first visible turn starts with its user bubble.
+        #expect(client.displayedMessages.count == 16)
+        #expect(client.displayedMessages.first?.id == "message-24")
 
         client.loadEarlierMessages()
 

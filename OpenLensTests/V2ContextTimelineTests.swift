@@ -255,8 +255,9 @@ struct V2ContextTimelineTests {
         #expect(chat.timelineItems(showsThinking: false).map(\.id) == expected)
         #expect(chat.messages.map(\.role) == [.user, .assistant])
         chat.displayLimit = 2
-        #expect(chat.hasEarlierMessages)
-        #expect(chat.timelineItems(showsThinking: false).map(\.id) == Array(expected.suffix(3)))
+        // The two-item window is extended back to the turn's user message, which is the first entry.
+        #expect(!chat.hasEarlierMessages)
+        #expect(chat.timelineItems(showsThinking: false).map(\.id) == expected)
         chat.loadEarlierMessages()
         #expect(chat.timelineItems(showsThinking: false).map(\.id) == expected)
         chat.unloadSession(ifMatching: "ses_1")

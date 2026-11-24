@@ -847,9 +847,20 @@ final class ChatClient: SSEEventHandlerDelegate {
     /// First index of the window: `limit` items from the end, moved back to the nearest user
     /// message so the first visible turn starts with its user bubble (web behaviour).
     private func windowStart(in messages: [ChatMessage], limit: Int) -> Int {
-        var start = max(messages.count - limit, 0)
-        while start > 0, messages[start].role != .user { start -= 1 }
-        return start
+        let start = max(messages.count - limit, 0)
+        guard start > 0 else { return start }
+        // No user message before the window: keep it as is rather than showing everything.
+        guard let user = messages[...start].lastIndex(where: { $0.role == .user }) else { return start }
+        return user
+    }
+
+    /// Same rule for the ordered ids of a transcript that carries context entries.
+    private func windowStart(inOrdered ids: [String], limit: Int) -> Int {
+        let start = max(ids.count - limit, 0)
+        guard start > 0 else { return start }
+        let userIDs = Set(messages.filter { $0.role == .user }.map(\.id))
+        guard let user = ids[...start].lastIndex(where: { userIDs.contains($0) }) else { return start }
+        return user
     }
 
     func loadEarlierMessages() {
@@ -884,7 +895,8 @@ final class ChatClient: SSEEventHandlerDelegate {
             var seen = Set<String>()
             let orderedIDs = (transcriptEntryOrder + messages.map(\.id) + contextEntries.map(\.id))
                 .filter { availableIDs.contains($0) && seen.insert($0).inserted }
-            displayedEntryOrder = Array(orderedIDs.suffix(displayLimit))
+            displayedEntryOrder = Array(orderedIDs[windowStart(inOrdered: orderedIDs, limit: displayLimit)...])
+            effectiveDisplayLimit = displayedEntryOrder.count
             let visibleIDs = Set(displayedEntryOrder)
             result = messages.filter { visibleIDs.contains($0.id) }
             displayedContextEntries = contextEntries.filter { visibleIDs.contains($0.id) }
