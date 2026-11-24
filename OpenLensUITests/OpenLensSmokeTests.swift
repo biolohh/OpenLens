@@ -34,27 +34,63 @@ final class OpenLensSmokeTests: XCTestCase {
         app.open(try XCTUnwrap(link.url))
         confirmSystemOpenPromptIfShown()
 
-        let tabBar = app.tabBars.firstMatch
-        XCTAssertTrue(tabBar.waitForExistence(timeout: 45), "No tab bar after connecting: connection failed?")
+        // The web-style home replaces the tab bar: wait for it by identifier.
+        let home = app.descendants(matching: .any).matching(identifier: "oc.home").firstMatch
+        XCTAssertTrue(home.waitForExistence(timeout: 45), "No home screen after connecting: connection failed?")
+        XCTAssertEqual(app.tabBars.count, 0, "The tab bar must be gone")
         sleep(3)
         snapshot("02-sessions")
 
         if let title = environment["OPENLENS_SMOKE_SESSION_TITLE"], !title.isEmpty {
             try chatRoundTrip(in: app, sessionTitle: title, prompt: environment["OPENLENS_SMOKE_PROMPT"])
-            // Back to the tab root: the chat is pushed and hides the tab bar.
-            if !tabBar.isHittable {
+            // Back to the home root: the chat is pushed on top of it.
+            if !home.isHittable {
                 app.navigationBars.buttons.firstMatch.tap()
                 sleep(2)
             }
         }
 
-        let tabs = tabBar.buttons
-        for index in 1..<max(tabs.count, 1) {
-            tabs.element(boundBy: index).tap()
-            sleep(3)
-            snapshot(String(format: "%02d-tab-%d", 3 + index, index))
+        // Project picker and search, as on the web home.
+        let picker = app.buttons["oc.projectPicker"]
+        if picker.waitForExistence(timeout: 5) {
+            picker.tap()
+            sleep(1)
+            snapshot("02b-project-picker")
+            let all = app.buttons["oc.project.all"]
+            if all.exists { all.tap() } else { picker.tap() }
         }
-        tabs.element(boundBy: 0).tap()
+        let search = app.textFields["oc.search"]
+        if search.waitForExistence(timeout: 5) {
+            search.tap()
+            search.typeText("a")
+            sleep(1)
+            snapshot("02c-search")
+            if let clear = app.buttons.matching(NSPredicate(format: "label == %@", "Dismiss")).allElementsBoundByIndex.last,
+               clear.exists { clear.tap() }
+            app.swipeDown()
+        }
+
+        // Every former tab screen is reachable from the header menu.
+        let destinations: [(id: String, shot: String)] = [
+            ("review", "04-review"), ("workspace", "05-workspace"),
+            ("micro", "06-micro"), ("settings", "07-settings"),
+        ]
+        for destination in destinations {
+            let menu = app.buttons["oc.menu"].firstMatch
+            XCTAssertTrue(menu.waitForExistence(timeout: 10), "Menu button missing before \(destination.id)")
+            menu.tap()
+            let row = app.buttons["oc.menu.\(destination.id)"]
+            XCTAssertTrue(row.waitForExistence(timeout: 5), "Menu row \(destination.id) missing")
+            if destination.id == "review" { snapshot("03b-menu-sheet") }
+            row.tap()
+            sleep(3)
+            snapshot(destination.shot)
+        }
+        // Back home.
+        app.buttons["oc.menu"].firstMatch.tap()
+        let homeRow = app.buttons["oc.menu.chat"]
+        if homeRow.waitForExistence(timeout: 5) { homeRow.tap() }
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "Home did not come back")
     }
 
     /// Real-UI check of the agent form's Submit state (no server: screenshot fixtures).

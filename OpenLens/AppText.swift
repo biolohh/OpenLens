@@ -531,4 +531,18 @@ enum AppText {
     static func onboardingStep(_ current: Int, _ total: Int) -> String {
         "Step \(current) of \(total)"
     }
+
+    // OpenCode web home (OCHomeView)
+    static let ocHome = "Home"
+    static let ocAllProjects = "All projects"
+    static let ocSearchSessions = "Search sessions"
+    static let ocSessionsResults = "Sessions"
+    static let ocNewSession = "New session"
+    static let ocToday = "Today"
+    static let ocYesterday = "Yesterday"
+    static let ocOlder = "Older"
+    static let ocRecentSessions = "Recent sessions"
+    static let ocNoResults = "No results"
+    static let ocMenuTitle = "Tabs"
+    static let ocCloseTab = "Close tab"
 }

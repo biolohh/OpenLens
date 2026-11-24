@@ -15,6 +15,9 @@ struct ConnectedRootView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var permissionSheetDetent = PermissionRequestSheet.defaultPresentationDetent
+    @State private var showNavigationSheet = false
+    /// Sessions opened during this run (the web's open "tabs"); shown in the menu sheet.
+    @State private var openedSessions: [OCSession] = []
 
     var body: some View {
         @Bindable var router = router
@@ -26,61 +29,7 @@ struct ConnectedRootView: View {
                     initialSessions: initialSessions
                 )
             } else {
-                TabView(selection: $router.selectedTab) {
-                    Tab(value: AppTab.chat) {
-                        tabNavigationView(for: .chat)
-                    } label: {
-                        tabLabel(for: .chat, selectedTab: router.selectedTab)
-                    }
-                    Tab(value: AppTab.review) {
-                        tabNavigationView(for: .review)
-                    } label: {
-                        tabLabel(for: .review, selectedTab: router.selectedTab)
-                    }
-                    Tab(value: AppTab.workspace) {
-                        tabNavigationView(for: .workspace)
-                    } label: {
-                        tabLabel(for: .workspace, selectedTab: router.selectedTab)
-                    }
-                    // ios18 branch: `TabRole.prominent` and `anyAppleOS` need the iOS 27 SDK
-                    // (Xcode 27); with Xcode 26 only the iOS 26 search-role tab is compiled.
-                    // Before iOS 26 the settings tab is a plain tab (no detached search slot).
-                    #if compiler(>=6.4)
-                    if #available(anyAppleOS 27.0, *) {
-                        Tab(value: AppTab.settings, role: .prominent) {
-                            tabNavigationView(for: .settings)
-                        } label: {
-                            tabLabel(for: .settings, selectedTab: router.selectedTab)
-                        }
-                    } else if #available(iOS 26.0, *) {
-                        Tab(value: AppTab.settings, role: .search) {
-                            tabNavigationView(for: .settings)
-                        } label: {
-                            tabLabel(for: .settings, selectedTab: router.selectedTab)
-                        }
-                    } else {
-                        Tab(value: AppTab.settings) {
-                            tabNavigationView(for: .settings)
-                        } label: {
-                            tabLabel(for: .settings, selectedTab: router.selectedTab)
-                        }
-                    }
-                    #else
-                    if #available(iOS 26.0, *) {
-                        Tab(value: AppTab.settings, role: .search) {
-                            tabNavigationView(for: .settings)
-                        } label: {
-                            tabLabel(for: .settings, selectedTab: router.selectedTab)
-                        }
-                    } else {
-                        Tab(value: AppTab.settings) {
-                            tabNavigationView(for: .settings)
-                        } label: {
-                            tabLabel(for: .settings, selectedTab: router.selectedTab)
-                        }
-                    }
-                    #endif
-                }
+                compactRoot
             }
         }
         .tint(Color.appPrimary)
@@ -114,16 +63,38 @@ struct ConnectedRootView: View {
         }
     }
 
-    private func tabLabel(for tab: AppTab, selectedTab: AppTab) -> some View {
-        Label(tab.title, systemImage: tab.icon)
-            .environment(\.symbolVariants, selectedTab == tab ? .fill : .none)
-    }
-
-    private var tabBarVisibility: Visibility {
-        shouldHideConnectedRootTabBar(
-            selectedTab: router.selectedTab,
-            chatPath: router.chatPath
-        ) ? .hidden : .visible
+    /// iPhone layout: no tab bar. Home (the chat tab root) stays mounted; the other
+    /// destinations replace it and are reached from the Home header menu (web "Tabs" sheet).
+    private var compactRoot: some View {
+        ZStack {
+            tabNavigationView(for: .chat)
+                .opacity(router.selectedTab == .chat ? 1 : 0)
+                .allowsHitTesting(router.selectedTab == .chat)
+                .accessibilityHidden(router.selectedTab != .chat)
+            if router.selectedTab != .chat {
+                tabNavigationView(for: router.selectedTab)
+            }
+        }
+        .sheet(isPresented: $showNavigationSheet) {
+            OCNavigationSheet(
+                selectedTab: router.selectedTab,
+                openedSessions: openedSessions,
+                onSelectTab: { tab in
+                    showNavigationSheet = false
+                    if tab == .chat { router.chatPath = [] }
+                    router.selectedTab = tab
+                },
+                onOpenSession: { session in
+                    showNavigationSheet = false
+                    router.selectChatSession(session)
+                },
+                onCloseSession: { session in
+                    openedSessions.removeAll { $0.id == session.id }
+                    router.clearChatSession(ifMatching: session.id)
+                    if openedSessions.isEmpty { showNavigationSheet = false }
+                }
+            )
+        }
     }
 
     private var permissionSheetBinding: Binding<OCPermissionRequest?> {
@@ -155,8 +126,6 @@ struct ConnectedRootView: View {
                     ConnectedDestinationView(chatClient: chatClient, destination: destination)
                 }
         }
-        // Keep this on the tab NavigationStack so TabView reliably hides the bar when Chat pushes a session.
-        .toolbar(tabBarVisibility, for: .tabBar)
     }
 
     private func pathBinding(for tab: AppTab) -> Binding<[RouterDestination]> {
@@ -170,28 +139,43 @@ struct ConnectedRootView: View {
     private func tabRootView(for tab: AppTab) -> some View {
         switch tab {
         case .chat:
-            SessionsListView(
+            OCHomeView(
                 initialState: initialSessions,
+                openCount: openedSessions.count,
                 onSelect: selectChatSession,
                 onDelete: handleDeletedSession,
-                newSessionModel: { await chatClient.newSessionModelPreference() }
+                newSessionModel: { await chatClient.newSessionModelPreference() },
+                onOpenMenu: { showNavigationSheet = true }
             )
+            .toolbar(.hidden, for: .navigationBar)
         case .micro:
-            MicroRootView(chatClient: chatClient)
+            MicroRootView(chatClient: chatClient).toolbar { menuToolbarItem }
         case .review:
-            ReviewRootView(chatClient: chatClient)
+            ReviewRootView(chatClient: chatClient).toolbar { menuToolbarItem }
         case .workspace:
-            WorkspaceRootView(chatClient: chatClient)
+            WorkspaceRootView(chatClient: chatClient).toolbar { menuToolbarItem }
         case .settings:
-            SettingsView()
+            SettingsView().toolbar { menuToolbarItem }
+        }
+    }
+
+    private var menuToolbarItem: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button { showNavigationSheet = true } label: {
+                Image(systemName: "square.grid.2x2")
+            }
+            .accessibilityIdentifier("oc.menu")
+            .accessibilityLabel(AppText.ocMenuTitle)
         }
     }
 
     private func selectChatSession(_ session: OCSession) {
+        if !openedSessions.contains(where: { $0.id == session.id }) { openedSessions.append(session) }
         router.selectChatSession(session)
     }
 
     private func handleDeletedSession(_ session: OCSession) {
+        openedSessions.removeAll { $0.id == session.id }
         router.clearChatSession(ifMatching: session.id)
         chatClient.unloadSession(ifMatching: session.id)
     }

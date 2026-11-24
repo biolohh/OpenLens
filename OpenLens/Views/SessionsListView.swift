@@ -633,7 +633,7 @@ private struct SessionsLoadErrorView: View {
     }
 }
 
-private struct NewSessionSheet: View {
+struct NewSessionSheet: View {
     private struct FolderBrowserRequest: Identifiable {
         let id = UUID()
         let directory: String
@@ -648,6 +648,11 @@ private struct NewSessionSheet: View {
 
     let newSessionModel: @MainActor () async -> OCV2ModelRef?
     let onCreated: (OCSession) -> Void
+
+    init(newSessionModel: @escaping @MainActor () async -> OCV2ModelRef?, onCreated: @escaping (OCSession) -> Void) {
+        self.newSessionModel = newSessionModel
+        self.onCreated = onCreated
+    }
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.connection) private var connection
