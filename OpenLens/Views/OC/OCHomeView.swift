@@ -173,6 +173,8 @@ struct OCHomeView: View {
     /// dark = base page, raised panel.
     private var pageBackground: Color { colorScheme == .dark ? Color.appBackground : Color.appTertiary }
     private var panelBackground: Color { colorScheme == .dark ? Color.appSurface : Color.appBackground }
+    /// Search field / picker button fill: web #252525 in dark, current surface in light.
+    private var fieldBackground: Color { colorScheme == .dark ? Color.appTertiary : Color.appSurface }
 
     // MARK: Body
 
@@ -319,7 +321,7 @@ struct OCHomeView: View {
             .foregroundStyle(Color.appPrimary)
             .padding(.horizontal, 12)
             .frame(height: 40)
-            .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(fieldBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -373,7 +375,7 @@ struct OCHomeView: View {
             .foregroundStyle(Color.appPrimary)
             .padding(.horizontal, 8)
             .frame(height: 28)
-            .background(selected ? Color.appTertiary : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .background(selected ? Color.appSelection : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -414,7 +416,7 @@ struct OCHomeView: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 36)
-        .background(Color.appSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(fieldBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
     private func resultsPanel(_ model: Model) -> some View {

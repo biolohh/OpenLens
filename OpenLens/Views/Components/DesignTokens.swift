@@ -43,6 +43,8 @@ struct OpenLensColorTokens {
     /// User chat bubble and its text. `nil` = the user accent (Settings → Appearance).
     var userBubble: OpenLensSemanticColor? = nil
     var onUserBubble: OpenLensSemanticColor? = nil
+    /// Selected / active item (menu row, picker row, active tab). `nil` = `tertiary`.
+    var selection: OpenLensSemanticColor? = nil
     /// Send button and its glyph. `nil` = the user accent.
     var sendAction: OpenLensSemanticColor? = nil
     var onSendAction: OpenLensSemanticColor? = nil
@@ -255,11 +257,11 @@ extension OpenLensTheme {
         id: "opencode",
         name: "OpenCode",
         colors: OpenLensColorTokens(
-            background: .init(light: .white, dark: .openLens(22, 22, 22)),
-            surface: .init(light: .openLens(248, 248, 248), dark: .openLens(28, 28, 28)),
+            background: .init(light: .white, dark: .openLens(8, 8, 8)),
+            surface: .init(light: .openLens(248, 248, 248), dark: .openLens(22, 22, 22)),
             primary: .init(light: .openLens(23, 23, 23), dark: .openLens(237, 237, 237)),
             secondary: .init(light: .openLens(111, 111, 111), dark: .openLens(160, 160, 160)),
-            tertiary: .init(light: .openLens(243, 243, 243), dark: .openLens(35, 35, 35)),
+            tertiary: .init(light: .openLens(243, 243, 243), dark: .openLens(37, 37, 37)),
             separator: .init(light: .openLens(232, 232, 232), dark: .openLens(40, 40, 40)),
             accent: .init(light: .openLens(23, 19, 17), dark: .openLens(241, 236, 232)),
             onAccent: .init(light: .white, dark: .openLens(23, 19, 17)),
@@ -268,6 +270,7 @@ extension OpenLensTheme {
             danger: .init(light: .openLens(220, 60, 40), dark: .openLens(252, 83, 58)),
             userBubble: .init(light: .openLens(240, 240, 240), dark: .openLens(42, 42, 42)),
             onUserBubble: .init(light: .openLens(23, 23, 23), dark: .openLens(237, 237, 237)),
+            selection: .init(light: .openLens(223, 223, 223), dark: .openLens(67, 67, 67)),
             sendAction: .init(light: .openLens(23, 19, 17), dark: .openLens(241, 236, 232)),
             onSendAction: .init(light: .white, dark: .openLens(23, 19, 17))
         ),
@@ -572,6 +575,10 @@ extension Color {
     /// User chat bubble: the theme's own bubble color when it defines one, else the user accent.
     static var appUserBubble: Color {
         OpenLensDesignSystem.currentTheme.colors.userBubble?.color ?? appUserAccent
+    }
+    /// Selected / active item: the theme's selection colour, else the tertiary fill.
+    static var appSelection: Color {
+        OpenLensDesignSystem.currentTheme.colors.selection?.color ?? appTertiary
     }
     static var appOnUserBubble: Color {
         OpenLensDesignSystem.currentTheme.colors.onUserBubble?.color ?? appUserOnAccent

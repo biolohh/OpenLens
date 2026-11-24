@@ -62,7 +62,7 @@ struct OCNavigationSheet: View {
                     .padding(.horizontal, 6)
                     .frame(height: 36)
                     .background(
-                        selectedTab == tab ? Color.appTertiary : .clear,
+                        selectedTab == tab ? Color.appSelection : .clear,
                         in: RoundedRectangle(cornerRadius: 6, style: .continuous)
                     )
                     .contentShape(Rectangle())
