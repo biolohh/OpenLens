@@ -57,7 +57,10 @@ struct OCChangesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .topLeading) { modePanel }
-        .accessibilityIdentifier("oc.changes")
+        // A marker, not an identifier on the container (that one would replace the children's).
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.changes")
+        }
         .task(id: LoadKey(sessionID: session.id, mode: mode, reload: reloadToken)) { await load() }
     }
 
