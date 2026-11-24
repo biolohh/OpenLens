@@ -467,6 +467,8 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal").firstMatch
             .waitForExistence(timeout: 8), "Terminal view missing")
         XCTAssertTrue(app.buttons["oc.terminal.tab"].firstMatch.waitForExistence(timeout: 15), "No terminal tab")
+        // Whatever happens below, close what this run created; terminals that already existed stay.
+        defer { closeOwnTerminals(in: app) }
         // Type only into a terminal this run created: a terminal that already existed may be
         // someone's, in another folder or inside a program. If the app reused one, open a new one.
         let ownSelected = app.buttons.matching(NSPredicate(
@@ -511,11 +513,22 @@ final class OpenLensSmokeTests: XCTestCase {
         entry.tap()
         XCTAssertTrue(app.staticTexts["openlens-smoke"].firstMatch.waitForExistence(timeout: 8),
                       "Terminal output lost after switching tabs")
+    }
 
-        // Close what this run created; terminals that already existed stay.
+    /// Closes the terminals this run created (value `new`), from wherever `walkTerminal` stopped.
+    private func closeOwnTerminals(in app: XCUIApplication) {
+        let terminal = app.descendants(matching: .any).matching(identifier: "oc.terminal").firstMatch
+        if !terminal.exists {
+            app.buttons["oc.tab.more"].tap()
+            let entry = app.buttons["oc.more.terminal"]
+            if entry.waitForExistence(timeout: 5) { entry.tap() }
+            _ = terminal.waitForExistence(timeout: 8)
+        }
+        let keyboardToggle = app.buttons["oc.terminal.key.keyboard"]
+        if app.keyboards.count > 0, keyboardToggle.exists { keyboardToggle.tap() }
         let created = app.buttons.matching(NSPredicate(format: "identifier == 'oc.terminal.close' AND value == 'new'"))
         var guardCount = 0
-        while created.firstMatch.exists, guardCount < 4 {
+        while created.firstMatch.waitForExistence(timeout: 2), guardCount < 4 {
             created.firstMatch.tap()
             guardCount += 1
             sleep(2)
