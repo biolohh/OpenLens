@@ -206,7 +206,9 @@ struct OCUsedToolsRow: View {
     let parts: [OCGroupedPart]
 
     private var store: OCExpansionStore { .shared }
-    @State private var openLines: Set<String> = []
+    /// Tool whose detail sheet is open. Inline expansion inside the lazy transcript hung the main
+    /// thread on device, so the detail opens in a sheet.
+    @State private var detailPartID: String?
 
     private var segments: [ChatMessage.AssistantSegment] { parts.compactMap(\.segment) }
 
@@ -267,10 +269,9 @@ struct OCUsedToolsRow: View {
             switch segment.kind {
             case .tool(let step):
                 let title = OCTimelineGrouping.toolTitle(step.toolName)
-                let open = openLines.contains(part.id)
                 VStack(alignment: .leading, spacing: 6) {
                     Button {
-                        if open { openLines.remove(part.id) } else { openLines.insert(part.id) }
+                        detailPartID = part.id
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Text(title).fontWeight(.semibold)
@@ -287,12 +288,27 @@ struct OCUsedToolsRow: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("oc.toolLine")
-                    .accessibilityValue(open ? "expanded" : "collapsed")
-
-                    if open {
-                        MessageBubbleView(message: part.message, assistantSegments: [segment])
-                            .padding(.leading, 4)
+                }
+                .sheet(isPresented: Binding(
+                    get: { detailPartID == part.id },
+                    set: { if !$0 { detailPartID = nil } }
+                )) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Text(title).fontWeight(.semibold)
+                            Text(detail(step, title: title)).foregroundStyle(Color.appSecondary)
+                            Spacer(minLength: 0)
+                        }
+                        .font(.system(size: 13))
+                        ScrollView { detailView(step).frame(maxWidth: .infinity, alignment: .leading) }
                     }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .foregroundStyle(Color.appPrimary)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(Color.appBackground)
+                    .accessibilityIdentifier("oc.toolDetail")
                 }
             case .reasoning(let text):
                 Text(segment.streamingText?.copyText() ?? text)
@@ -303,6 +319,41 @@ struct OCUsedToolsRow: View {
                 EmptyView()
             }
         }
+    }
+
+    /// Output preview, partial output before an error, returned files and a copy button.
+    private func detailView(_ step: ChatMessage.PersistedToolStep) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let output = step.outputPreview {
+                Text(output)
+                    .font(.openLensMono(size: 11))
+                    .foregroundStyle(step.isError ? Color.appDanger : Color.appSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let partial = step.partialOutputPreview {
+                Text(AppText.partialOutputBeforeError)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Color.appSecondary)
+                Text(partial)
+                    .font(.openLensMono(size: 11))
+                    .foregroundStyle(Color.appSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !step.files.isEmpty || step.omittedFileCount > 0 {
+                ToolResultFilesStrip(files: step.files, omittedFileCount: step.omittedFileCount, usesRetroTypography: false)
+            }
+            Button {
+                UIPasteboard.general.string = [step.label, step.outputPreview, step.partialOutputPreview]
+                    .compactMap { $0 }.joined(separator: "\n")
+            } label: {
+                Label(AppText.copyMessage, systemImage: "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(Color.appSecondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.toolCopy")
+        }
+        .padding(.leading, 4)
     }
 
     /// The formatter's label starts with the tool name; the web shows the arguments after the name.

@@ -214,13 +214,15 @@ final class OpenLensSmokeTests: XCTestCase {
         if used.waitForExistence(timeout: 10) {
             used.tap()
             sleep(1)
+            snapshot("03-chat-used-expanded")
             let line = app.buttons["oc.toolLine"].firstMatch
             if line.waitForExistence(timeout: 5) {
                 line.tap()
                 sleep(1)
                 snapshot("03-chat-tool-line-open")
+                app.swipeDown()
+                sleep(1)
             }
-            snapshot("03-chat-used-expanded")
             used.tap()
         }
 
