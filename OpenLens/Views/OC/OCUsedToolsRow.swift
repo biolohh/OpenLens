@@ -268,47 +268,10 @@ struct OCUsedToolsRow: View {
         if let segment = part.segment {
             switch segment.kind {
             case .tool(let step):
-                let title = OCTimelineGrouping.toolTitle(step.toolName)
-                VStack(alignment: .leading, spacing: 6) {
-                    Button {
-                        detailPartID = part.id
-                    } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text(title).fontWeight(.semibold)
-                                .foregroundStyle(step.isError ? Color.appDanger : Color.appPrimary)
-                            Text(detail(step, title: title))
-                                .foregroundStyle(Color.appSecondary)
-                                .multilineTextAlignment(.leading)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Spacer(minLength: 0)
-                            if step.isRunning { ProgressView().controlSize(.mini) }
-                        }
-                        .font(.system(size: 13))
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("oc.toolLine")
-                }
-                .sheet(isPresented: Binding(
-                    get: { detailPartID == part.id },
-                    set: { if !$0 { detailPartID = nil } }
-                )) {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack(spacing: 8) {
-                            Text(title).fontWeight(.semibold)
-                            Text(detail(step, title: title)).foregroundStyle(Color.appSecondary)
-                            Spacer(minLength: 0)
-                        }
-                        .font(.system(size: 13))
-                        ScrollView { detailView(step).frame(maxWidth: .infinity, alignment: .leading) }
-                    }
-                    .padding(16)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .foregroundStyle(Color.appPrimary)
-                    .presentationDetents([.medium, .large])
-                    .presentationDragIndicator(.visible)
-                    .presentationBackground(Color.appBackground)
-                    .accessibilityIdentifier("oc.toolDetail")
+                if OCFileSupport.isFileTool(step.toolName) {
+                    OCFileToolLine(part: part) { toolLine(part, step) }
+                } else {
+                    toolLine(part, step)
                 }
             case .reasoning(let text):
                 Text(segment.streamingText?.copyText() ?? text)
@@ -318,6 +281,52 @@ struct OCUsedToolsRow: View {
             default:
                 EmptyView()
             }
+        }
+    }
+
+    @ViewBuilder
+    private func toolLine(_ part: OCGroupedPart, _ step: ChatMessage.PersistedToolStep) -> some View {
+        let title = OCTimelineGrouping.toolTitle(step.toolName)
+        VStack(alignment: .leading, spacing: 6) {
+            Button {
+                detailPartID = part.id
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).fontWeight(.semibold)
+                        .foregroundStyle(step.isError ? Color.appDanger : Color.appPrimary)
+                    Text(detail(step, title: title))
+                        .foregroundStyle(Color.appSecondary)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    if step.isRunning { ProgressView().controlSize(.mini) }
+                }
+                .font(.system(size: 13))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.toolLine")
+        }
+        .sheet(isPresented: Binding(
+            get: { detailPartID == part.id },
+            set: { if !$0 { detailPartID = nil } }
+        )) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    Text(title).fontWeight(.semibold)
+                    Text(detail(step, title: title)).foregroundStyle(Color.appSecondary)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 13))
+                ScrollView { detailView(step).frame(maxWidth: .infinity, alignment: .leading) }
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .foregroundStyle(Color.appPrimary)
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(Color.appBackground)
+            .accessibilityIdentifier("oc.toolDetail")
         }
     }
 

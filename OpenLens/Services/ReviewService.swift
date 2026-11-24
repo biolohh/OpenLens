@@ -158,4 +158,39 @@ final class ReviewService {
             .map { "\($0.path)|\($0.status)|\($0.additions)|\($0.deletions)" }
             .joined(separator: "#")
     }
+
+    // MARK: - Web-style Changes tab
+
+    /// What the Changes tab of one session can show, like the web's review modes.
+    func changesAvailability(sessionID: String, directory: String?, projectID: String?) async throws -> OCChangesAvailability {
+        if ScreenshotFixtures.isEnabled {
+            return OCChangesAvailability(isGit: true, modes: [.turn])
+        }
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let projects = try await client.listProjects()
+        let project = projects.first { projectID != nil && $0.id == projectID }
+            ?? projects.first { directory != nil && $0.worktree == directory }
+        guard project?.vcs?.lowercased() == "git" else {
+            return OCChangesAvailability(isGit: false, modes: [])
+        }
+        // The working tree is read through the client's active folder, so it is only
+        // the session's own tree when the two agree.
+        let context = await client.currentContextDirectory()
+        let sameFolder = directory == nil || context == directory
+        return OCChangesAvailability(isGit: true, modes: sameFolder ? [.git, .turn] : [.turn])
+    }
+
+    /// The files of one mode: `git` is the working tree, `turn` the newest turn of the session.
+    func loadChanges(sessionID: String, mode: OCChangesMode) async throws -> [ReviewFileChange] {
+        if ScreenshotFixtures.isEnabled {
+            return ScreenshotFixtures.reviewSnapshot(sessionID: sessionID).workingTree
+        }
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let diffs: [OCFileDiff]
+        switch mode {
+        case .git: diffs = try await client.getWorkingTreeDiff()
+        case .turn: diffs = try await client.getSessionDiff(sessionID: sessionID)
+        }
+        return diffs.map(ReviewFileChange.init(diff:))
+    }
 }
