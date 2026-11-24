@@ -3066,6 +3066,11 @@ final class ChatClient: SSEEventHandlerDelegate {
         )
     }
 
+    /// Only v2 sessions record an agent change; elsewhere the composer offers no agent control.
+    var canSwitchSessionAgent: Bool {
+        usesV2SessionAPI && !isDemoMode && !isRecordedReplayMode
+    }
+
     /// Switches the open v2 session's agent (the composer's agent picker).
     func selectAgent(_ agent: String) {
         guard let sessionID = currentSession?.id else { return }

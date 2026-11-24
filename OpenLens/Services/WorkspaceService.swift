@@ -413,8 +413,14 @@ final class WorkspaceService {
     }
 
     func loadSlashActions() async -> [WorkspaceSlashActionItem] {
+        await loadSlashCatalog().actions
+    }
+
+    /// Slash commands and agents from one pair of requests, plus the agents the composer's agent
+    /// control may offer (one `GET /api/agent`, shared by both).
+    func loadSlashCatalog() async -> (actions: [WorkspaceSlashActionItem], selectableAgents: [WorkspaceAgentItem]) {
         if ScreenshotFixtures.isEnabled {
-            return ScreenshotFixtures.workspaceSnapshot(path: nil).commands.map {
+            let fixtures = ScreenshotFixtures.workspaceSnapshot(path: nil).commands.map {
                 WorkspaceSlashActionItem(
                     kind: .command,
                     token: $0.id,
@@ -423,9 +429,10 @@ final class WorkspaceService {
                     prompt: $0.prompt
                 )
             }
+            return (fixtures, [])
         }
 
-        guard let client = connection.client else { return [] }
+        guard let client = connection.client else { return ([], []) }
 
         async let commandsTask = tryCommands(client)
         async let agentsTask = tryAgents(client)
@@ -440,7 +447,9 @@ final class WorkspaceService {
             )
         }
 
-        let agents = await agentsTask.map { agent in
+        let listedAgents = await agentsTask
+        let selectableAgents = listedAgents.filter(\.selectable).map(\.item)
+        let agents = listedAgents.map(\.item).map { agent in
             WorkspaceSlashActionItem(
                 kind: .agent,
                 token: agent.id,
@@ -450,13 +459,14 @@ final class WorkspaceService {
             )
         }
 
-        return (commands + agents)
+        let actions = (commands + agents)
             .sorted { lhs, rhs in
                 if lhs.kind != rhs.kind {
                     return lhs.kind == .command
                 }
                 return lhs.title.localizedCaseInsensitiveCompare(rhs.title) == .orderedAscending
             }
+        return (actions, selectableAgents)
     }
 
     /// Only v2 servers list skills; older ones expose them as slash commands.
@@ -529,24 +539,9 @@ final class WorkspaceService {
         }
     }
 
-    /// Agents the user can pick for a session (the web composer's agent control): primary or
-    /// all-mode, not hidden. Subagents are reached with `/agent` and task tools instead.
-    func loadSelectableAgents() async -> [WorkspaceAgentItem] {
-        guard !ScreenshotFixtures.isEnabled, let client = connection.client,
-              let agents = try? await client.listAgents() else { return [] }
-        return agents
-            .filter { $0.hidden != true && $0.mode != "subagent" }
-            .map { agent in
-                WorkspaceAgentItem(
-                    id: agent.id,
-                    title: agent.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? agent.id,
-                    description: agent.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
-                    prompt: "/\(agent.id)"
-                )
-            }
-    }
-
-    private func tryAgents(_ client: OpenCodeClient) async -> [WorkspaceAgentItem] {
+    /// Every listed agent as a slash item, plus whether the user can pick it for a session
+    /// (primary or all mode, not hidden; subagents are reached with `/agent` and task tools).
+    private func tryAgents(_ client: OpenCodeClient) async -> [(item: WorkspaceAgentItem, selectable: Bool)] {
         let contextDirectory = await client.currentContextDirectory() ?? "nil"
         do {
             let agents = try await client.listAgents()
@@ -554,14 +549,15 @@ final class WorkspaceService {
                 .map { agent in
                     let title = agent.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank
                         ?? agent.id
-                    return WorkspaceAgentItem(
+                    let item = WorkspaceAgentItem(
                         id: agent.id,
                         title: title,
                         description: agent.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
                         prompt: "/\(agent.id)"
                     )
+                    return (item: item, selectable: agent.hidden != true && agent.mode != "subagent")
                 }
-                .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
+                .sorted { $0.item.title.localizedCaseInsensitiveCompare($1.item.title) == .orderedAscending }
         } catch {
             Logger.api.error("WorkspaceService failed to load agents for context directory \(contextDirectory, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return []
