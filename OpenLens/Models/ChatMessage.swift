@@ -2351,15 +2351,21 @@ struct ChatTimelineItem: Identifiable {
     /// rows still communicate their state statically, avoiding a render loop
     /// per tool when an agent fan-outs many tasks.
     let animatesSubagentStatus: Bool
+    /// Non-empty for the web-style "Used N ..." group: this item stands for all of these parts.
+    var groupedParts: [OCGroupedPart] = []
+    /// Copy + duration footer shown under the last text of a finished turn.
+    var assistantFooter: OCAssistantFooterInfo?
 
     init(
         id: String,
         content: Content,
-        animatesSubagentStatus: Bool = false
+        animatesSubagentStatus: Bool = false,
+        groupedParts: [OCGroupedPart] = []
     ) {
         self.id = id
         self.content = content
         self.animatesSubagentStatus = animatesSubagentStatus
+        self.groupedParts = groupedParts
     }
 }
 

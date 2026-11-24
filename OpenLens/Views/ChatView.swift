@@ -2918,7 +2918,7 @@ private struct ChatMessagesListView: View {
     }
 
     private func rebuildTimeline() {
-        timelineItems = chatClient.timelineItems(showsThinking: showThinking)
+        timelineItems = OCTimelineGrouping.group(chatClient.timelineItems(showsThinking: showThinking))
 #if DEBUG
         print(
             "CHAT_STRESS_TIMELINE_REBUILD displayed=\(chatClient.displayedMessages.count) "
@@ -2933,18 +2933,26 @@ private struct ChatMessagesListView: View {
         case .context(let entry):
             SessionContextTimelineRow(entry: entry, initiallyExpanded: ScreenshotFixtures.expandsContextDetails)
         case .message(let message):
-            MessageBubbleView(
-                message: message,
-                submissionState: message.role == .user
-                    ? chatClient.promptSubmissionState(forMessageID: message.id)
-                    : nil
-            )
+            if message.role == .user {
+                OCUserMessageRow(chatClient: chatClient, message: message)
+            } else {
+                MessageBubbleView(message: message)
+            }
         case .assistantSegment(let message, let segment):
-            AssistantSegmentTimelineRow(
-                message: message,
-                segmentID: segment.id,
-                animatesSubagentStatus: item.animatesSubagentStatus
-            )
+            if !item.groupedParts.isEmpty {
+                OCUsedToolsRow(parts: item.groupedParts)
+            } else {
+                VStack(alignment: .leading, spacing: 4) {
+                    AssistantSegmentTimelineRow(
+                        message: message,
+                        segmentID: segment.id,
+                        animatesSubagentStatus: item.animatesSubagentStatus
+                    )
+                    if let footer = item.assistantFooter {
+                        OCAssistantFooter(info: footer)
+                    }
+                }
+            }
         case .streamingAssistantText(let message, let projection):
             MessageBubbleView(
                 message: message,

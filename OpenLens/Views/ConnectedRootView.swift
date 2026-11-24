@@ -79,6 +79,7 @@ struct ConnectedRootView: View {
                 }
             }
         }
+        .environment(\.ocShell, OCShell(openCount: openedSessions.count, openMenu: { showNavigationSheet = true }))
         .onChange(of: router.selectedTab, initial: true) { _, tab in mountedTabs.insert(tab) }
         // Any route (menu, deep link, Live Activity, Shortcut) that selects a chat session opens a "tab".
         .onChange(of: router.chatPath, initial: true) { _, _ in
@@ -379,18 +380,8 @@ private struct SessionChatDestinationView: View {
     @State private var isReady = false
 
     var body: some View {
-        Group {
-            if isReady {
-                ChatView(chatClient: chatClient, initialSession: session)
-                    .id(session.id)
-            } else {
-                ProgressView()
-                    .tint(Color.appSecondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-        }
-        .background(Color.appBackground)
-        .toolbar(.visible, for: .navigationBar)
+        OCSessionView(chatClient: chatClient, session: session, isReady: isReady)
+            .background(Color.appBackground)
         .task(id: session.id) {
             isReady = false
             if chatClient.currentSession?.id != session.id {
