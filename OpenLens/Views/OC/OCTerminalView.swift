@@ -153,6 +153,11 @@ private struct OCTerminalSurface: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var keyboardFocused = false
     @State private var controlArmed = false
+    /// The view follows new output; a user scroll away from the bottom pauses it until they
+    /// scroll back down or type.
+    @State private var followsOutput = true
+    /// The last scroll position is at (or within a row of) the bottom.
+    @State private var atBottom = true
 
     private static let fontSize: CGFloat = 13
     private static let horizontalPadding: CGFloat = 12
@@ -186,11 +191,15 @@ private struct OCTerminalSurface: View {
                 controlArmed: $controlArmed,
                 keyboardFocused: $keyboardFocused,
                 applicationCursorKeys: connection.applicationCursorKeys,
-                send: { connection.input($0) }
+                send: { data in
+                    followsOutput = true
+                    connection.input(data)
+                }
             )
         }
         .background(
             OCTerminalKeyboard(focused: $keyboardFocused) { event in
+                followsOutput = true
                 switch event {
                 case .text(let text):
                     let data = OCTerminalKeys.encode(text, control: controlArmed)
@@ -232,9 +241,24 @@ private struct OCTerminalSurface: View {
                 }
                 .defaultScrollAnchor(.bottom)
                 .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: Bool.self) { geometry in
+                    geometry.contentOffset.y + geometry.containerSize.height
+                        >= geometry.contentSize.height - metrics.lineHeight
+                } action: { _, bottom in
+                    atBottom = bottom
+                }
+                .onScrollPhaseChange { old, phase in
+                    // Only the user's own scrolling decides; content growth alone never unpins.
+                    if phase == .interacting {
+                        followsOutput = false
+                    } else if phase == .idle, old == .interacting || old == .decelerating {
+                        followsOutput = atBottom
+                    }
+                }
                 .onChange(of: connection.revision) { _, _ in
-                    // New output brings the screen back into view, like a terminal.
-                    if let last = connection.lines.last?.id { reader.scrollTo(last, anchor: .bottom) }
+                    // New output keeps the screen in view, unless the user is reading back.
+                    guard followsOutput, let last = connection.lines.last?.id else { return }
+                    reader.scrollTo(last, anchor: .bottom)
                 }
             }
             .contentShape(Rectangle())
