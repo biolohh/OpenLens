@@ -226,6 +226,9 @@ private struct OCTerminalSurface: View {
                     }
                     .padding(.horizontal, Self.horizontalPadding)
                     .padding(.vertical, Self.verticalPadding)
+                    // At least the pane's height, so the part of a row left over goes below the
+                    // screen, not above its first line (the scroll view is anchored to the bottom).
+                    .frame(minHeight: proxy.size.height, alignment: .top)
                 }
                 .defaultScrollAnchor(.bottom)
                 .scrollIndicators(.hidden)

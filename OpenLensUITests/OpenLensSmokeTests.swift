@@ -440,6 +440,8 @@ final class OpenLensSmokeTests: XCTestCase {
         }
         app.buttons["oc.tab.session"].tap()
 
+        walkTerminal(in: app)
+
         app.buttons["oc.tab.more"].tap()
         XCTAssertTrue(app.buttons["oc.more.files"].waitForExistence(timeout: 5), "More sheet missing Files")
         XCTAssertTrue(app.buttons["oc.more.usage"].exists, "More sheet missing Usage")
@@ -452,6 +454,63 @@ final class OpenLensSmokeTests: XCTestCase {
         sleep(1)
         app.buttons["oc.tab.session"].tap()
         snapshot("03-chat-session")
+    }
+
+    /// Terminal (More... > Terminal): attaches to the session's terminal (the app creates one when
+    /// the session has none), runs `echo openlens-smoke` and `ls`, checks the output came back and
+    /// survives a tab switch, then closes only the terminals this run created.
+    private func walkTerminal(in app: XCUIApplication) {
+        app.buttons["oc.tab.more"].tap()
+        let entry = app.buttons["oc.more.terminal"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), "More sheet missing Terminal")
+        entry.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal").firstMatch
+            .waitForExistence(timeout: 8), "Terminal view missing")
+        XCTAssertTrue(app.buttons["oc.terminal.tab"].firstMatch.waitForExistence(timeout: 15), "No terminal tab")
+        // The prompt is on screen once the replay arrived.
+        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '$'")).firstMatch
+        XCTAssertTrue(prompt.waitForExistence(timeout: 15), "No shell prompt in the terminal")
+        snapshot("03-chat-terminal")
+
+        let screen = app.descendants(matching: .any).matching(identifier: "oc.terminal.screen").firstMatch
+        XCTAssertTrue(screen.exists, "Terminal screen missing")
+        screen.tap()
+        sleep(1)
+        app.typeText("echo openlens-smoke\n")
+        // The echoed command line also contains the word: only a line that is exactly the
+        // output proves the round trip.
+        let output = app.staticTexts["openlens-smoke"].firstMatch
+        XCTAssertTrue(output.waitForExistence(timeout: 10), "echo output did not come back from the terminal")
+        app.typeText("ls\n")
+        sleep(2)
+        snapshot("03-chat-terminal-ls")
+        XCTAssertTrue(app.buttons["oc.terminal.key.esc"].exists, "Key bar missing")
+        XCTAssertTrue(app.buttons["oc.terminal.key.ctrl"].exists, "Key bar Ctrl missing")
+        // Hide the keyboard, so the tab row is free.
+        let keyboardToggle = app.buttons["oc.terminal.key.keyboard"]
+        if keyboardToggle.exists { keyboardToggle.tap() }
+        sleep(1)
+
+        // Survives a tab switch: same attachment, the output is still there.
+        app.buttons["oc.tab.session"].tap()
+        sleep(1)
+        app.buttons["oc.tab.more"].tap()
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), "More sheet missing Terminal")
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["openlens-smoke"].firstMatch.waitForExistence(timeout: 8),
+                      "Terminal output lost after switching tabs")
+
+        // Close what this run created; terminals that already existed stay.
+        let created = app.buttons.matching(NSPredicate(format: "identifier == 'oc.terminal.close' AND value == 'new'"))
+        var guardCount = 0
+        while created.firstMatch.exists, guardCount < 4 {
+            created.firstMatch.tap()
+            guardCount += 1
+            sleep(2)
+        }
+        XCTAssertFalse(created.firstMatch.exists, "The terminal the smoke created is still open")
+        snapshot("03-chat-terminal-closed")
+        app.buttons["oc.tab.session"].tap()
     }
 
     /// iOS asks "Open in OpenLens?" when a URL comes from outside the app.
