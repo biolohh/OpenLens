@@ -553,6 +553,7 @@ enum AppText {
     static let ocUsage = "Usage"
     static let ocComposerPlaceholder = "Ask anything, / for commands, @ for context..."
     static let ocComposerAgent = "Agent"
+    static let ocComposerModel = "Model"
     static let ocComposerVariant = "Variant"
     static let ocSessionDetails = "Session details"
     static let ocNoChangesTitle = "No tracked changes"

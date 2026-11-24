@@ -7,6 +7,7 @@ import SwiftUI
 /// them out and owns the agent / model / variant controls.
 struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
     @Bindable var chatClient: ChatClient
+    @Environment(\.colorScheme) private var colorScheme
     /// Selectable agents (`GET /api/agent`, primary/all, not hidden); empty hides the agent control.
     let agents: [WorkspaceAgentItem]
     let showsAttach: Bool
@@ -22,14 +23,17 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
                 .padding(.top, 10)
             controlRow
         }
-        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(cardFill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.appSeparator, lineWidth: 1)
+                .stroke(Color.appBorder, lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("oc.composer")
     }
+
+    /// Same raised-field fill as OCHomeView's search field: web #252525 in dark, surface in light.
+    private var cardFill: Color { colorScheme == .dark ? Color.appTertiary : Color.appSurface }
 
     private var controlRow: some View {
         HStack(spacing: 2) {
@@ -69,6 +73,12 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
 
     private var currentAgent: String? { chatClient.currentSession?.agent }
 
+    /// The session's agent, or "Default" when it has none (the server picks), never a guess.
+    private var agentTitle: String {
+        guard let currentAgent else { return AppText.thinkingDefault }
+        return agents.first(where: { $0.id == currentAgent })?.title ?? currentAgent
+    }
+
     private var agentMenu: some View {
         Menu {
             Section(AppText.ocComposerAgent) {
@@ -85,39 +95,57 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
                 }
             }
         } label: {
-            chipLabel(agents.first(where: { $0.id == currentAgent })?.title ?? currentAgent ?? agents.first?.title ?? AppText.ocComposerAgent)
+            chipLabel(agentTitle)
         }
         .accessibilityIdentifier("oc.composer.agent")
         .accessibilityLabel(AppText.ocComposerAgent)
+        .accessibilityValue(agentTitle)
     }
 
     // MARK: Model
 
     private var modelChip: some View {
         Button(action: openModelPicker) {
-            HStack(spacing: 3) {
-                if let provider = chatClient.selectedModel?.providerName, !provider.isEmpty {
-                    Text(provider)
-                        .foregroundStyle(Color.appSecondary)
-                        .lineLimit(1)
-                    Text("/").foregroundStyle(Color.appSecondary)
-                }
-                Text(chatClient.selectedModelDisplayName)
-                    .foregroundStyle(Color.appPrimary.opacity(0.85))
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(Color.appSecondary)
+            // The web shows "provider / model" and drops the provider first when the row is tight.
+            ViewThatFits(in: .horizontal) {
+                modelChipLabel(showsProvider: true)
+                modelChipLabel(showsProvider: false)
             }
-            .font(.system(size: 13))
-            .padding(.horizontal, 6)
-            .frame(height: 28)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("oc.composer.model")
-        .accessibilityLabel(chatClient.selectedModelDisplayName)
+        .accessibilityLabel(AppText.ocComposerModel)
+        .accessibilityValue(modelAccessibilityValue)
+    }
+
+    private var modelAccessibilityValue: String {
+        if let provider = chatClient.selectedModel?.providerName, !provider.isEmpty {
+            return "\(provider), \(chatClient.selectedModelDisplayName)"
+        }
+        return chatClient.selectedModelDisplayName
+    }
+
+    private func modelChipLabel(showsProvider: Bool) -> some View {
+        HStack(spacing: 3) {
+            if showsProvider, let provider = chatClient.selectedModel?.providerName, !provider.isEmpty {
+                Text(provider)
+                    .foregroundStyle(Color.appSecondary)
+                    .lineLimit(1)
+                    .fixedSize()
+                Text("/").foregroundStyle(Color.appSecondary)
+            }
+            Text(chatClient.selectedModelDisplayName)
+                .foregroundStyle(Color.appPrimary.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(Color.appSecondary)
+        }
+        .font(.system(size: 13))
+        .padding(.horizontal, 6)
+        .frame(height: 28)
     }
 
     // MARK: Variant
@@ -151,6 +179,7 @@ struct OCComposerCard<Field: View, Attach: View, Action: View>: View {
         }
         .accessibilityIdentifier("oc.composer.variant")
         .accessibilityLabel(AppText.ocComposerVariant)
+        .accessibilityValue(chatClient.selectedVariantDisplayName)
     }
 }
 
