@@ -47,6 +47,9 @@ struct OCSessionView: View {
     @State private var tab: Tab = .session
     @State private var showMore = false
     @State private var showDetails = false
+    /// Files tab: open file tabs and the shown one (nil = the "All files" tree).
+    @State private var filesOpen: [String] = []
+    @State private var filesActive: String?
     /// Chosen in the More sheet; run once the sheet has finished dismissing.
     @State private var pendingMoreAction: (() -> Void)?
 
@@ -75,7 +78,7 @@ struct OCSessionView: View {
             header(shell)
             VStack(spacing: 0) {
                 tabRow
-                projectChip
+                if tab == .session { projectChip }
                 content
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -89,6 +92,7 @@ struct OCSessionView: View {
             .padding(.bottom, 4)
         }
         .environment(\.ocPanelBackground, panelBackground)
+        .environment(\.ocSessionDirectory, current.directory)
         .background(pageBackground.ignoresSafeArea())
         // The nav bar is hidden, so the system edge-swipe is gone: a leading-edge drag on this
         // screen only pops the chat (same as the back chevron / Tabs > Home).
@@ -122,7 +126,11 @@ struct OCSessionView: View {
         }
         // A deep link, Live Activity or Shortcut into a session lands on its Session tab.
         .onChange(of: router?.chatPath) { _, _ in tab = .session }
-        .onChange(of: session.id) { _, _ in tab = .session }
+        .onChange(of: session.id) { _, _ in
+            tab = .session
+            filesOpen = []
+            filesActive = nil
+        }
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.session")
         }
@@ -249,9 +257,13 @@ struct OCSessionView: View {
             case .session:
                 EmptyView()
             case .changes:
-                OCPlaceholder(icon: "arrow.triangle.branch", title: AppText.ocNoChangesTitle, subtitle: AppText.ocNoChangesSubtitle)
+                OCChangesView(session: current) { path in
+                    if !filesOpen.contains(path) { filesOpen.append(path) }
+                    filesActive = path
+                    tab = .files
+                }
             case .files:
-                OCPlaceholder(icon: "folder", title: AppText.ocTabFiles, subtitle: AppText.ocComingSoon)
+                OCFilesView(directory: current.directory, openPaths: $filesOpen, activePath: $filesActive)
             case .terminal:
                 OCPlaceholder(icon: "terminal", title: AppText.ocTabTerminal, subtitle: AppText.ocComingSoon)
             }

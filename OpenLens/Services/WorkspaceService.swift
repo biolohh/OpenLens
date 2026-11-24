@@ -286,13 +286,13 @@ final class WorkspaceService {
 
     /// Files and folders at `relativePath` inside a session's folder, for
     /// choosing a file to reference in a prompt.
-    func loadRepositoryEntries(at relativePath: String, in directory: String) async throws -> [RepositoryEntry] {
+    func loadRepositoryEntries(at relativePath: String, in directory: String, includesHidden: Bool = false) async throws -> [RepositoryEntry] {
         if ScreenshotFixtures.isEnabled {
             return ScreenshotFixtures.repositoryEntries(at: relativePath)
         }
         guard let client = connection.client else { throw OpenCodeError.notConnected }
         let entries = try await client.listFiles(path: relativePath.isEmpty ? "." : relativePath, directory: directory)
-        return Self.repositoryEntries(from: entries, directory: directory)
+        return Self.repositoryEntries(from: entries, directory: directory, includesHidden: includesHidden)
     }
 
     /// Files whose path matches `query` inside a session's folder, in the
@@ -357,7 +357,8 @@ final class WorkspaceService {
     static func repositoryEntries(
         from entries: [OCWorkspaceFileEntry],
         directory: String,
-        keepsServerOrder: Bool = false
+        keepsServerOrder: Bool = false,
+        includesHidden: Bool = false
     ) -> [RepositoryEntry] {
         let root = directory.hasSuffix("/") ? String(directory.dropLast()) : directory
         var seen = Set<String>()
@@ -367,7 +368,7 @@ final class WorkspaceService {
             let isDirectory = entry.type?.lowercased() == "directory" || path.hasSuffix("/")
             while path.hasSuffix("/") { path.removeLast() }
             let name = (path as NSString).lastPathComponent
-            guard !path.isEmpty, !path.hasPrefix("/"), path != ".", !name.hasPrefix("."),
+            guard !path.isEmpty, !path.hasPrefix("/"), path != ".", includesHidden || !name.hasPrefix("."),
                   seen.insert(path).inserted else { return nil }
             return RepositoryEntry(path: path, name: name, isDirectory: isDirectory)
         }
