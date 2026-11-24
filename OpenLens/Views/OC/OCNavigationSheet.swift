@@ -19,7 +19,7 @@ struct OCNavigationSheet: View {
                     Button { onOpenSession(session) } label: {
                         HStack(spacing: 8) {
                             OCMonogram(letter: OCHomeGrouping.monogram(OCHomeGrouping.projectName(for: session)))
-                            Text(session.title.isEmpty ? AppText.titleUntitled : session.title)
+                            Text(session.title.isEmpty ? AppText.ocNewSession : session.title)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundStyle(Color.appPrimary)
                                 .lineLimit(1)
@@ -73,7 +73,6 @@ struct OCNavigationSheet: View {
         .presentationDetents([.height(CGFloat(openedSessions.isEmpty ? 0 : openedSessions.count * 44 + 13) + CGFloat(Self.destinations.count * 36) + 56)])
         .presentationDragIndicator(.visible)
         .presentationBackground(Color.appBackground)
-        .accessibilityIdentifier("oc.menuSheet")
     }
 
     private func title(for tab: AppTab) -> String {

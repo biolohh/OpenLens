@@ -44,8 +44,9 @@ final class OpenLensSmokeTests: XCTestCase {
         if let title = environment["OPENLENS_SMOKE_SESSION_TITLE"], !title.isEmpty {
             try chatRoundTrip(in: app, sessionTitle: title, prompt: environment["OPENLENS_SMOKE_PROMPT"])
             // Back to the home root: the chat is pushed on top of it.
-            if !home.isHittable {
-                app.navigationBars.buttons.firstMatch.tap()
+            let back = app.navigationBars.buttons.element(boundBy: 0)
+            if back.exists, !app.buttons["oc.projectPicker"].exists {
+                back.tap()
                 sleep(2)
             }
         }

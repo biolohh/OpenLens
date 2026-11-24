@@ -165,7 +165,14 @@ struct OCHomeView: View {
                 .padding(.bottom, 4)
         }
         .background(pageBackground.ignoresSafeArea())
-        .accessibilityIdentifier("oc.home")
+        // A marker element, not an identifier on the container: SwiftUI would push the
+        // container's identifier down onto every child and hide their own identifiers.
+        .overlay(alignment: .topLeading) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .accessibilityElement()
+                .accessibilityIdentifier("oc.home")
+        }
         .sheet(item: $newSessionRequest) { _ in
             NewSessionSheet(newSessionModel: newSessionModel) { session in
                 sessions.insert(session, at: 0)
@@ -552,7 +559,7 @@ struct OCSessionRow: View {
 
     var body: some View {
         let project = OCHomeGrouping.projectName(for: session)
-        let title = session.title.isEmpty ? AppText.titleUntitled : session.title
+        let title = session.title.isEmpty ? AppText.ocNewSession : session.title
         HStack(spacing: 8) {
             OCMonogram(letter: OCHomeGrouping.monogram(project))
                 .frame(width: 24, alignment: .leading)
