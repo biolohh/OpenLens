@@ -29,18 +29,6 @@ extension EnvironmentValues {
     }
 }
 
-/// Keeps the interactive edge-swipe back working while the navigation bar is hidden.
-extension UINavigationController: UIGestureRecognizerDelegate {
-    override open func viewDidLoad() {
-        super.viewDidLoad()
-        interactivePopGestureRecognizer?.delegate = self
-    }
-
-    public func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        viewControllers.count > 1
-    }
-}
-
 /// The web's mobile session screen: header (monogram, title, open count), tab row
 /// Session | Changes | More..., project chip, then the tab content. The Session tab is the
 /// existing `ChatView` (streaming, permissions, questions, forms, queue, undo all unchanged);
@@ -102,6 +90,18 @@ struct OCSessionView: View {
         }
         .environment(\.ocPanelBackground, panelBackground)
         .background(pageBackground.ignoresSafeArea())
+        // The nav bar is hidden, so the system edge-swipe is gone: a leading-edge drag on this
+        // screen only pops the chat (same as the back chevron / Tabs > Home).
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    guard value.startLocation.x < 20,
+                          value.translation.width > 80,
+                          abs(value.translation.height) < 60,
+                          let router, !router.chatPath.isEmpty else { return }
+                    withAnimation { router.chatPath.removeLast() }
+                }
+        )
         .toolbar(.hidden, for: .navigationBar)
         .sheet(isPresented: $showMore, onDismiss: {
             let action = pendingMoreAction
