@@ -38,7 +38,12 @@ enum ChatStreamInstrumentation {
         os_signpost(.end, log: log, name: "Streaming Flush", signpostID: signpostID)
     }
 
+    /// Calls of `recordScrollToBottom` since launch; the debug overlay and the smoke test read it
+    /// to measure how often the transcript repins itself after a tap.
+    nonisolated(unsafe) private(set) static var scrollToBottomCount = 0
+
     static func recordScrollToBottom() {
+        scrollToBottomCount += 1
         os_signpost(.event, log: log, name: "Scroll To Bottom")
     }
 

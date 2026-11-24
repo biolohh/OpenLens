@@ -134,6 +134,17 @@ struct OCSessionView: View {
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.session")
         }
+#if DEBUG
+        // Smoke measurement: how many times the transcript scrolled itself to the bottom.
+        .overlay(alignment: .bottomLeading) {
+            TimelineView(.periodic(from: .now, by: 0.25)) { _ in
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityIdentifier("oc.debug.repins")
+                    .accessibilityLabel("\(ChatStreamInstrumentation.scrollToBottomCount)")
+            }
+        }
+#endif
     }
 
     // MARK: Header

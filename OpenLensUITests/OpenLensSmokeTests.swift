@@ -327,8 +327,11 @@ final class OpenLensSmokeTests: XCTestCase {
                 card = app.buttons["oc.fileCard"].firstMatch
             }
             if card.waitForExistence(timeout: 5) {
+                let repinsBefore = repinCount(in: app)
                 card.tap()
-                sleep(1)
+                sleep(3)
+                // The screenshot name carries the numbers: repins before the tap and after 3 s.
+                snapshot("03-chat-repins-\(repinsBefore)-\(repinCount(in: app))")
                 snapshot("03-chat-used-card-after-tap")
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
                     .waitForExistence(timeout: 8), "File card did not open its diff (card value: \(String(describing: card.value)))")
@@ -440,6 +443,12 @@ final class OpenLensSmokeTests: XCTestCase {
         let buttons = alert.buttons
         // The confirm button is the last one ("Open" / "Megnyitás").
         buttons.element(boundBy: buttons.count - 1).tap()
+    }
+
+    /// `ChatStreamInstrumentation.scrollToBottomCount`, read from the debug overlay.
+    private func repinCount(in app: XCUIApplication) -> Int {
+        let element = app.descendants(matching: .any).matching(identifier: "oc.debug.repins").firstMatch
+        return Int(element.label) ?? -1
     }
 
     private func snapshot(_ name: String) {
