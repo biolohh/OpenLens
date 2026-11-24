@@ -242,12 +242,13 @@ final class MessagesService {
         let resolvedModelID = msg.info.modelID?.nilIfBlank ?? msg.info.model?.modelID
         let resolvedProviderID = msg.info.providerID?.nilIfBlank ?? msg.info.model?.providerID
 
-        return ChatMessage(
+        let message = ChatMessage(
             id: msg.info.id,
             role: msg.info.role,
             content: textContent,
             parts: msg.parts,
             isStreaming: false,
+            createdAt: msg.info.createdTimestamp.map { Date(timeIntervalSince1970: $0) } ?? Date(),
             cost: msg.info.cost,
             tokens: msg.info.tokens,
             modelID: resolvedModelID,
@@ -255,5 +256,7 @@ final class MessagesService {
             finish: msg.info.finish,
             parentUserMessageID: msg.info.parentID
         )
+        message.completedAt = msg.info.time?.completedSeconds.map { Date(timeIntervalSince1970: $0) }
+        return message
     }
 }

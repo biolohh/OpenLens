@@ -99,6 +99,7 @@ enum OCTimelineGrouping {
 
     /// Latest part end time (server milliseconds), if the parts carry one.
     static func partEnd(of message: ChatMessage) -> Date? {
+        if let completed = message.completedAt { return completed }
         let ends = message.parts.compactMap { part -> Double? in
             guard let time = part.time?.value as? [String: Any] else { return nil }
             if let end = time["end"] as? Double { return end }

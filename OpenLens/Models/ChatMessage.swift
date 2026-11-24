@@ -544,6 +544,8 @@ final class ChatMessage: Identifiable {
         }
     }
     let createdAt: Date
+    /// Server completion time of an assistant message (web turn duration); nil while running.
+    var completedAt: Date?
     var cost: Double?
     var tokens: OCTokenUsage?
 

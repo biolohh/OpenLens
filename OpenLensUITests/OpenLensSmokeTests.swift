@@ -43,10 +43,13 @@ final class OpenLensSmokeTests: XCTestCase {
 
         if let title = environment["OPENLENS_SMOKE_SESSION_TITLE"], !title.isEmpty {
             try chatRoundTrip(in: app, sessionTitle: title, prompt: environment["OPENLENS_SMOKE_PROMPT"])
-            // Back to the home root: the chat is pushed on top of it.
-            let back = app.navigationBars.buttons.element(boundBy: 0)
-            if back.exists, !app.buttons["oc.projectPicker"].exists {
-                back.tap()
+            // Back to the home root: the chat is pushed on top of it; the web has no back
+            // button, Home is reached from the header's Tabs sheet.
+            if !app.buttons["oc.projectPicker"].exists {
+                app.buttons["oc.menu"].firstMatch.tap()
+                let homeRow = app.buttons["oc.menu.chat"]
+                XCTAssertTrue(homeRow.waitForExistence(timeout: 5), "Home row missing in Tabs sheet")
+                homeRow.tap()
                 sleep(2)
             }
         }
@@ -167,6 +170,7 @@ final class OpenLensSmokeTests: XCTestCase {
         row.tap()
         sleep(3)
         snapshot("03-chat-empty")
+        walkSessionScreen(in: app)
 
         guard let prompt, !prompt.isEmpty else { return }
         let composer = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
@@ -189,9 +193,39 @@ final class OpenLensSmokeTests: XCTestCase {
         app.swipeDown()
         snapshot("03d-chat-answer")
 
-        let back = app.navigationBars.buttons.element(boundBy: 0)
-        if back.exists { back.tap() }
+    }
+
+    /// The web-style session screen: header, Session | Changes | More... tabs, the "Used N" group.
+    private func walkSessionScreen(in app: XCUIApplication) {
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.session").firstMatch
+            .waitForExistence(timeout: 10), "Session screen marker missing")
+        XCTAssertTrue(app.buttons["oc.tab.session"].exists, "Session tab missing")
+        XCTAssertTrue(app.buttons["oc.tab.changes"].exists, "Changes tab missing")
+        XCTAssertTrue(app.buttons["oc.tab.more"].exists, "More tab missing")
+        XCTAssertEqual(app.navigationBars.count, 0, "No navigation bar in the session screen")
+
+        let used = app.buttons["oc.used"].firstMatch
+        if used.waitForExistence(timeout: 10) {
+            used.tap()
+            sleep(1)
+            snapshot("03-chat-used-expanded")
+            used.tap()
+        }
+
+        app.buttons["oc.tab.changes"].tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.placeholder").firstMatch
+            .waitForExistence(timeout: 5), "Changes placeholder missing")
+        snapshot("03-chat-changes")
+        app.buttons["oc.tab.session"].tap()
+
+        app.buttons["oc.tab.more"].tap()
+        XCTAssertTrue(app.buttons["oc.more.files"].waitForExistence(timeout: 5), "More sheet missing Files")
+        XCTAssertTrue(app.buttons["oc.more.usage"].exists, "More sheet missing Usage")
+        snapshot("03-chat-more")
+        app.swipeDown()
         sleep(1)
+        app.buttons["oc.tab.session"].tap()
+        snapshot("03-chat-session")
     }
 
     /// iOS asks "Open in OpenLens?" when a URL comes from outside the app.
