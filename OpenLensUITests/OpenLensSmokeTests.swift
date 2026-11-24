@@ -329,8 +329,9 @@ final class OpenLensSmokeTests: XCTestCase {
             if card.waitForExistence(timeout: 5) {
                 card.tap()
                 sleep(1)
+                snapshot("03-chat-used-card-after-tap")
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
-                    .waitForExistence(timeout: 8), "File card did not open its diff")
+                    .waitForExistence(timeout: 8), "File card did not open its diff (card value: \(String(describing: card.value)))")
                 snapshot("03-chat-used-card-expanded")
                 card.tap()
             }
