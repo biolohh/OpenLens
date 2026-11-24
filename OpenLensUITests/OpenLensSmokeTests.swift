@@ -93,6 +93,10 @@ final class OpenLensSmokeTests: XCTestCase {
         dismiss.tap()
         XCTAssertTrue(home.waitForExistence(timeout: 10), "Home did not come back after dismissing the sheet")
 
+        // Composer of a throw-away session: the web card (+, agent, model, variant, square send),
+        // one short prompt, then the session is deleted again.
+        try throwawayComposerRoundTrip(in: app, home: home)
+
         // Every former tab screen is reachable from the header menu.
         let destinations: [(id: String, shot: String)] = [
             ("review", "04-review"), ("workspace", "05-workspace"),
@@ -114,6 +118,72 @@ final class OpenLensSmokeTests: XCTestCase {
         let homeRow = app.buttons["oc.menu.chat"]
         if homeRow.waitForExistence(timeout: 5) { homeRow.tap() }
         XCTAssertTrue(home.waitForExistence(timeout: 10), "Home did not come back")
+    }
+
+    /// Creates "zz-smoke-composer", checks the composer card, sends one short prompt, waits for
+    /// the answer and deletes the session (context menu on Home). Skipped when the sheet has no
+    /// usable workspace, so a server without a default project does not fail the whole run.
+    private func throwawayComposerRoundTrip(in app: XCUIApplication, home: XCUIElement) throws {
+        let title = "zz-smoke-composer"
+        app.buttons["oc.newSession"].tap()
+        XCTAssertTrue(app.navigationBars["New Session"].waitForExistence(timeout: 10), "New session sheet did not open")
+        let titleField = app.textFields.firstMatch
+        XCTAssertTrue(titleField.waitForExistence(timeout: 5), "No title field")
+        titleField.tap()
+        titleField.typeText(title)
+        let create = app.buttons["Create"]
+        XCTAssertTrue(create.waitForExistence(timeout: 5), "No Create button")
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: create)
+        guard XCTWaiter().wait(for: [enabled], timeout: 15) == .completed else {
+            XCTFail("Create stayed disabled (no workspace)")
+            return
+        }
+        create.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.session").firstMatch
+            .waitForExistence(timeout: 15), "New session did not open")
+
+        let card = app.descendants(matching: .any).matching(identifier: "oc.composer").firstMatch
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "Composer card missing")
+        XCTAssertTrue(app.buttons["oc.composer.attach"].exists, "Composer + button missing")
+        XCTAssertTrue(app.buttons["oc.composer.model"].exists, "Composer model chip missing")
+        XCTAssertTrue(app.textViews["Ask anything, / for commands, @ for context..."].exists
+            || app.textFields["Ask anything, / for commands, @ for context..."].exists, "Web placeholder missing")
+        XCTAssertFalse(app.buttons["session-summary"].exists, "Old summary chip must be gone")
+        snapshot("03e-composer-card")
+
+        let field = app.textViews.firstMatch.exists ? app.textViews.firstMatch : app.textFields.firstMatch
+        field.tap()
+        field.typeText("Reply with the single word ok.")
+        snapshot("03f-composer-typed")
+        let send = app.buttons["Send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 5), "No Send button")
+        send.tap()
+        let stop = app.buttons["Stop"]
+        _ = stop.waitForExistence(timeout: 15)
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: stop)
+        XCTAssertEqual(XCTWaiter().wait(for: [finished], timeout: 120), .completed, "Answer did not finish")
+        sleep(2)
+        snapshot("03g-composer-answered")
+
+        // Back to Home through the leading edge swipe, then delete the throw-away session.
+        let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.003, dy: 0.5))
+        edge.press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5)))
+        XCTAssertTrue(app.buttons["oc.projectPicker"].waitForExistence(timeout: 8), "Did not return to Home")
+        let row = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+        if row.waitForExistence(timeout: 10) {
+            row.press(forDuration: 1.2)
+            let delete = app.buttons["Delete"]
+            if delete.waitForExistence(timeout: 5) {
+                delete.tap()
+                let confirm = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@ AND label CONTAINS %@", "Delete", title)).firstMatch
+                if confirm.waitForExistence(timeout: 5) { confirm.tap() }
+            }
+            XCTAssertFalse(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", title)).firstMatch
+                .waitForExistence(timeout: 5), "Throw-away session was not deleted")
+        } else {
+            XCTFail("Throw-away session not listed on Home")
+        }
+        XCTAssertTrue(home.waitForExistence(timeout: 10), "Home missing after cleanup")
     }
 
     /// Real-UI check of the agent form's Submit state (no server: screenshot fixtures).
