@@ -364,10 +364,10 @@ final class OpenLensSmokeTests: XCTestCase {
             let mode = app.buttons["oc.changes.mode"]
             if mode.waitForExistence(timeout: 5) {
                 mode.tap()
-                let turn = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "label == %@ AND identifier != %@", "Last turn changes", "oc.changes.mode"))
-                    .firstMatch
-                if turn.waitForExistence(timeout: 4) { turn.tap() }
+                let turn = app.buttons["oc.changes.mode.turn"]
+                XCTAssertTrue(turn.waitForExistence(timeout: 4), "Mode panel did not open")
+                snapshot("03-chat-changes-modes")
+                turn.tap()
             }
             sleep(3)
             snapshot("03-chat-changes")
@@ -381,8 +381,7 @@ final class OpenLensSmokeTests: XCTestCase {
                 let open = app.buttons["oc.changes.openFile"].firstMatch
                 if open.waitForExistence(timeout: 3) {
                     open.tap()
-                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.content").firstMatch
-                        .waitForExistence(timeout: 8), "Open file did not show the file")
+                    XCTAssertTrue(app.buttons["oc.files.tab"].firstMatch.waitForExistence(timeout: 8), "Open file did not show the file")
                     snapshot("03-chat-changes-open-file")
                 }
             }
@@ -410,8 +409,7 @@ final class OpenLensSmokeTests: XCTestCase {
         let fileRow = rows.matching(NSPredicate(format: "value == ''")).firstMatch
         if fileRow.exists {
             fileRow.tap()
-            XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.content").firstMatch
-                .waitForExistence(timeout: 8), "Tapping a file did not open it")
+            XCTAssertTrue(app.buttons["oc.files.tab"].firstMatch.waitForExistence(timeout: 8), "Tapping a file did not open it")
             snapshot("03-chat-files-file")
         }
         app.buttons["oc.tab.session"].tap()

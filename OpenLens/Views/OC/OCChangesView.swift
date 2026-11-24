@@ -22,6 +22,8 @@ struct OCChangesView: View {
     @State private var state: LoadState = .loading
     @State private var expanded: Set<String> = []
     @State private var reloadToken = 0
+    /// The web's select popover, as a small panel under the header.
+    @State private var showsModes = false
 
     private struct LoadKey: Hashable {
         let sessionID: String
@@ -54,6 +56,7 @@ struct OCChangesView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .overlay(alignment: .topLeading) { modePanel }
         .accessibilityIdentifier("oc.changes")
         .task(id: LoadKey(sessionID: session.id, mode: mode, reload: reloadToken)) { await load() }
     }
@@ -102,19 +105,8 @@ struct OCChangesView: View {
         let current = mode ?? .turn
         let modes = availability?.modes ?? []
         if modes.count > 1 {
-            Menu {
-                ForEach(modes, id: \.self) { option in
-                    Button {
-                        expanded = []
-                        mode = option
-                    } label: {
-                        if option == current {
-                            Label(option.title, systemImage: "checkmark")
-                        } else {
-                            Text(option.title)
-                        }
-                    }
-                }
+            Button {
+                withAnimation(.easeOut(duration: 0.12)) { showsModes.toggle() }
             } label: {
                 HStack(spacing: 5) {
                     Text(current.title).font(.system(size: 13, weight: .semibold))
@@ -125,12 +117,51 @@ struct OCChangesView: View {
                 .frame(height: 28)
                 .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .accessibilityIdentifier("oc.changes.mode")
         } else {
             Text(current.title)
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundStyle(Color.appPrimary)
                 .accessibilityIdentifier("oc.changes.mode")
+        }
+    }
+
+    @ViewBuilder
+    private var modePanel: some View {
+        if showsModes, let modes = availability?.modes, modes.count > 1 {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(modes, id: \.self) { option in
+                    Button {
+                        showsModes = false
+                        if option != mode {
+                            expanded = []
+                            mode = option
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark")
+                                .font(.system(size: 10, weight: .semibold))
+                                .opacity(option == mode ? 1 : 0)
+                            Text(option.title).font(.system(size: 13))
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(Color.appPrimary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 34)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("oc.changes.mode.\(option.rawValue)")
+                }
+            }
+            .frame(width: 220)
+            .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+            .shadow(color: .black.opacity(0.15), radius: 12, y: 4)
+            .padding(.leading, 12)
+            .padding(.top, 44)
+            .transition(.opacity)
         }
     }
 
