@@ -529,6 +529,23 @@ final class WorkspaceService {
         }
     }
 
+    /// Agents the user can pick for a session (the web composer's agent control): primary or
+    /// all-mode, not hidden. Subagents are reached with `/agent` and task tools instead.
+    func loadSelectableAgents() async -> [WorkspaceAgentItem] {
+        guard !ScreenshotFixtures.isEnabled, let client = connection.client,
+              let agents = try? await client.listAgents() else { return [] }
+        return agents
+            .filter { $0.hidden != true && $0.mode != "subagent" }
+            .map { agent in
+                WorkspaceAgentItem(
+                    id: agent.id,
+                    title: agent.name?.trimmingCharacters(in: .whitespacesAndNewlines).nilIfBlank ?? agent.id,
+                    description: agent.description?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "",
+                    prompt: "/\(agent.id)"
+                )
+            }
+    }
+
     private func tryAgents(_ client: OpenCodeClient) async -> [WorkspaceAgentItem] {
         let contextDirectory = await client.currentContextDirectory() ?? "nil"
         do {

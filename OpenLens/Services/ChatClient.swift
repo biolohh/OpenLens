@@ -3066,6 +3066,12 @@ final class ChatClient: SSEEventHandlerDelegate {
         )
     }
 
+    /// Switches the open v2 session's agent (the composer's agent picker).
+    func selectAgent(_ agent: String) {
+        guard let sessionID = currentSession?.id else { return }
+        enqueueSessionSettingsChange(.agent(agent), for: sessionID)
+    }
+
     private func enqueueSessionSettingsChange(_ change: SessionSettingsChange, for sessionID: String) {
         guard canCompose, usesV2SessionAPI,
               !isDemoMode,

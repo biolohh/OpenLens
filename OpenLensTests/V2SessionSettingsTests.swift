@@ -182,6 +182,29 @@ struct V2SessionSettingsTests {
         #expect(chat.currentSession?.agent == "plan")
     }
 
+    /// The OC composer card's agent and variant controls: agent X, model Y, variant Z end up on the session.
+    @Test func theComposerAgentModelAndVariantControlsSwitchTheSessionSettings() async throws {
+        let server = SettingsFakeServer()
+        await server.addSession("ses_1", model: Self.claude, agent: "build")
+        let chat = try await Self.makeChat(server: server)
+        await chat.loadSession(Self.listedSession("ses_1"))
+
+        chat.selectAgent("plan")
+        let gpt = try #require(chat.availableModels.first { $0.modelID == "gpt-x" })
+        chat.selectModel(gpt)
+        chat.selectVariant("low")
+        chat.inputText = "Hello"
+        chat.send()
+        try await Self.waitUntil { await server.promptRequests.count == 1 }
+
+        let paths = await server.mutationPaths
+        #expect(paths.first == "/api/session/ses_1/agent")
+        #expect(paths.last == "/api/session/ses_1/prompt")
+        #expect(await server.session("ses_1")?.agent == "plan")
+        #expect(await server.session("ses_1")?.model == OCV2ModelRef(id: "gpt-x", providerID: "openai", variant: "low"))
+        #expect(chat.currentSession?.agent == "plan")
+    }
+
     @Test func aFailedChangeKeepsItsPromptOutAndRestoresTheCanonicalSelection() async throws {
         let server = SettingsFakeServer()
         await server.addSession("ses_1", model: Self.claude, agent: "build")

@@ -2739,9 +2739,10 @@ nonisolated struct OCAgent: Codable, Identifiable, Sendable {
     let description: String?
     let mode: String?
     let native: Bool?
+    let hidden: Bool?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, description, mode, native
+        case id, name, description, mode, native, hidden
     }
 
     init(from decoder: Decoder) throws {
@@ -2767,6 +2768,7 @@ nonisolated struct OCAgent: Codable, Identifiable, Sendable {
         description = try container.decodeIfPresent(String.self, forKey: .description)
         mode = try container.decodeIfPresent(String.self, forKey: .mode)
         native = try container.decodeIfPresent(Bool.self, forKey: .native)
+        hidden = try container.decodeIfPresent(Bool.self, forKey: .hidden)
     }
 }
 

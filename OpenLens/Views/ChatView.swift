@@ -25,10 +25,13 @@ struct ChatView: View {
     @Environment(\.workspaceService) private var workspaceService
     @Environment(\.chatEasterEgg) private var chatEasterEgg
     @Environment(\.ocPanelBackground) private var ocPanelBackground
+    @Environment(\.ocShell) private var ocShell
     @Environment(AppRouter.self) private var router: AppRouter?
     @AppStorage(FeatureFlags.debugFeaturesKey) private var debugFeaturesEnabled: Bool = FeatureFlags.debugFeaturesDefault
 
     @State private var showModelPicker = false
+    /// Agents for the OC composer card's agent control (iPhone OC shell only).
+    @State private var composerAgents: [WorkspaceAgentItem] = []
     @State private var showContextStatus = false
     @State private var showSessionSummary = false
     @State private var showTodoList = false
@@ -198,6 +201,7 @@ struct ChatView: View {
             guard chatClient.sessionLocationState == .ready else { return }
             await loadCommands(force: true)
             await loadSkills(force: true)
+            if ocShell != nil { composerAgents = await workspaceService.loadSelectableAgents() }
         }
         // Watch completion/visibility inputs, not the viewed marker this
         // acknowledgement writes. The service merges confirmed markers into
@@ -575,12 +579,12 @@ struct ChatView: View {
     private var chatComposerInset: some View {
         VStack(spacing: 8) {
             if chatClient.currentSession != nil && chatClient.showsComposer {
-                modelSelectionRow
+                if ocShell != nil { ocComposerChipsRow } else { modelSelectionRow }
             }
             inputBar
         }
-        .padding(.horizontal, isComposerExpanded ? 0 : 16)
-        .padding(.bottom, isComposerExpanded ? 12 : 0)
+        .padding(.horizontal, ocShell != nil ? 0 : (isComposerExpanded ? 0 : 16))
+        .padding(.bottom, ocShell != nil ? 10 : (isComposerExpanded ? 12 : 0))
         .animation(.easeOut(duration: 0.4), value: isComposerExpanded)
     }
 
@@ -643,6 +647,32 @@ struct ChatView: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 2)
+    }
+
+    /// OC composer: the web keeps only the todo pill above the card; the context ring stays here
+    /// too. The summary chip is reachable from More > Session details.
+    @ViewBuilder
+    private var ocComposerChipsRow: some View {
+        let hasContext = chatClient.contextUsageSummary != nil
+        if !chatClient.todos.isEmpty || hasContext {
+            HStack(spacing: 6) {
+                if !chatClient.todos.isEmpty { todoChip }
+                Spacer(minLength: 0)
+                if let contextUsage = chatClient.contextUsageSummary {
+                    Button {
+                        showContextStatus = true
+                    } label: {
+                        ChatContextUsageRing(summary: contextUsage)
+                            .frame(minWidth: 44, minHeight: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("context-usage")
+                }
+            }
+            .padding(.horizontal, 4)
+            .padding(.top, 4)
+        }
     }
 
     private var sessionSummaryChip: some View {
@@ -759,36 +789,24 @@ struct ChatView: View {
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             }
 
+            if ocShell != nil {
+                OCComposerCard(
+                    chatClient: chatClient,
+                    agents: composerAgents,
+                    showsAttach: chatClient.canAttachFiles,
+                    openModelPicker: { showModelPicker = true },
+                    field: { composerTokenLayout },
+                    attach: { composerAttachMenu },
+                    action: { composerActionButton }
+                )
+            } else {
             HStack(alignment: .center, spacing: 8) {
                 HStack(alignment: .center, spacing: 8) {
                     if chatClient.canAttachFiles {
                         composerAttachMenu
                     }
 
-                    ComposerTokenLayout(spacing: 6, minimumFieldWidth: 120, lineHeight: 32) {
-                        if let selectedSlashAction {
-                            selectedSlashActionChip(selectedSlashAction)
-                        }
-
-                        ForEach(attachedSkills) { skill in
-                            attachedSkillChip(skill)
-                                .transition(.scale(scale: 0.8).combined(with: .opacity))
-                        }
-
-                        TextField(composerPlaceholder, text: $chatClient.inputText, axis: .vertical)
-                            .focused($isInputFocused)
-                            .onSubmit {
-                                performComposerAction()
-                            }
-                            .onTapGesture {
-                                setComposerExpanded(true)
-                            }
-                            .lineLimit(1 ... 5)
-                            .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: 16))
-                            .foregroundStyle(primaryTextColor)
-                            .disabled(chatClient.currentSession == nil)
-                            .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                    }
+                    composerTokenLayout
 
                     composerActionButton
                         .padding(4)
@@ -798,8 +816,37 @@ struct ChatView: View {
                 .padding(.vertical, 4)
                 .chatComposerFieldChrome(visualMode)
             }
+            }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, ocShell != nil ? 10 : 16)
+    }
+
+    /// Slash / skill chips and the prompt field (shared by the classic capsule and the OC card).
+    private var composerTokenLayout: some View {
+        ComposerTokenLayout(spacing: 6, minimumFieldWidth: 120, lineHeight: ocShell != nil ? 24 : 32) {
+            if let selectedSlashAction {
+                selectedSlashActionChip(selectedSlashAction)
+            }
+
+            ForEach(attachedSkills) { skill in
+                attachedSkillChip(skill)
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+            }
+
+            TextField(composerPlaceholder, text: $chatClient.inputText, axis: .vertical)
+                .focused($isInputFocused)
+                .onSubmit {
+                    performComposerAction()
+                }
+                .onTapGesture {
+                    setComposerExpanded(true)
+                }
+                .lineLimit(1 ... 5)
+                .font(isRetroChat ? RetroChatStyle.bodyFont : .system(size: ocShell != nil ? 14 : 16))
+                .foregroundStyle(primaryTextColor)
+                .disabled(chatClient.currentSession == nil)
+                .frame(maxWidth: .infinity, minHeight: ocShell != nil ? 24 : 32, alignment: .leading)
+        }
     }
 
     private var composerAttachMenu: some View {
@@ -816,10 +863,10 @@ struct ChatView: View {
                 }
             }
         } label: {
-            Image(systemName: "paperclip")
+            Image(systemName: ocShell != nil ? "plus" : "paperclip")
                 .font(.system(size: 17, weight: .medium))
                 .foregroundStyle(secondaryTextColor)
-                .frame(width: 32, height: 32)
+                .frame(width: 32, height: ocShell != nil ? 28 : 32)
                 .contentShape(Rectangle())
         }
         .disabled(chatClient.isPreparingComposerImage)
@@ -906,7 +953,9 @@ struct ChatView: View {
     }
 
     private var animatedComposerActionButtonLabel: some View {
-        composerActionButtonLabel
+        Group {
+            if ocShell != nil { ocComposerActionLabel } else { composerActionButtonLabel }
+        }
             .animation(.spring(duration: 0.25), value: chatClient.isLoading)
             .animation(.spring(duration: 0.25), value: chatClient.isQueueingPrompt)
     }
@@ -914,6 +963,7 @@ struct ChatView: View {
     private var composerPlaceholder: String {
         guard selectedSlashAction == nil else { return "Add arguments..." }
         guard attachedSkills.isEmpty else { return AppText.messagePlaceholderWithAttachedSkills }
+        if ocShell != nil { return AppText.ocComposerPlaceholder }
         return availableSkills.isEmpty ? AppText.messagePlaceholder : AppText.messagePlaceholderWithSkills
     }
 
@@ -996,6 +1046,14 @@ struct ChatView: View {
         .frame(maxWidth: 180, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Skill \(skill.id)")
+    }
+
+    private var ocComposerActionLabel: OCComposerSendLabel {
+        if chatClient.isQueueingPrompt { return OCComposerSendLabel(kind: .submitting, enabled: true) }
+        if chatClient.isLoading && !hasComposerText {
+            return OCComposerSendLabel(kind: chatClient.isStoppingResponse ? .stopping : .stop, enabled: true)
+        }
+        return OCComposerSendLabel(kind: chatClient.isLoading ? .queue : .send, enabled: !isComposerActionDisabled)
     }
 
     @ViewBuilder
