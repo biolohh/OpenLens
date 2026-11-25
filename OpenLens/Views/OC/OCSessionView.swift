@@ -298,32 +298,6 @@ struct OCSessionView: View {
     }
 }
 
-/// Centered icon, title and hint, used until the Changes / Files / Terminal tabs exist.
-private struct OCPlaceholder: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 22))
-                .foregroundStyle(Color.appSecondary)
-            Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.appPrimary)
-            Text(subtitle)
-                .font(.system(size: 13))
-                .foregroundStyle(Color.appSecondary)
-                .multilineTextAlignment(.center)
-        }
-        .padding(32)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.clear.contentShape(Rectangle()))
-        .accessibilityIdentifier("oc.placeholder")
-    }
-}
-
 /// The web's "More..." bottom sheet: Files, Terminal, Usage, Session details. The chosen action
 /// runs after the sheet has dismissed (a sheet presented mid-dismiss can be dropped).
 private struct OCSessionMoreSheet: View {

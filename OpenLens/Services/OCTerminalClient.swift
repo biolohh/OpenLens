@@ -42,11 +42,11 @@ nonisolated enum OCTerminalClientError: Error, LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .unavailable: OCTerminalText.unavailable
-        case .outdated: OCTerminalText.outdated
-        case .notFound: OCTerminalText.disconnected
+        case .unavailable: AppText.ocTerminalUnavailable
+        case .outdated: AppText.ocTerminalOutdated
+        case .notFound: AppText.ocTerminalDisconnected
         case .status(let code, let message): message.isEmpty ? "HTTP \(code)" : message
-        case .invalidResponse: OCTerminalText.connectionFailed
+        case .invalidResponse: AppText.ocTerminalConnectionFailed
         }
     }
 }
