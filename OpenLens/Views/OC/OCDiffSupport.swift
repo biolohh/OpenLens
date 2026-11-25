@@ -192,9 +192,16 @@ final class OCDiffCommentStore {
         all.removeAll { $0.sessionID == sessionID }
     }
 
-    /// Comments join a prompt unless it is a slash command, which must keep starting with "/".
-    nonisolated static func commentsApply(typed: String, hasSlashChip: Bool) -> Bool {
-        !hasSlashChip && !typed.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    /// Comments join a prompt unless it is a recognised slash command (a chip, "/undo" or a known
+    /// command or agent token), which must keep starting with "/". A path such as "/etc/hosts" is text.
+    nonisolated static func commentsApply(typed: String, hasSlashChip: Bool, knownTokens: [String] = []) -> Bool {
+        if hasSlashChip { return false }
+        let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("/") else { return true }
+        let word = String(text.dropFirst().prefix { !$0.isWhitespace }).lowercased()
+        if word == "undo" { return false }
+        let known = knownTokens.map { String($0.drop { $0 == "/" }).lowercased() }
+        return !known.contains(word)
     }
 
     /// The prompt as sent, like the web's request builder: the typed text first, then the comment

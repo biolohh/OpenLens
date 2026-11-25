@@ -360,6 +360,12 @@ struct OCChangesS2Tests {
         #expect(!OCDiffCommentStore.commentsApply(typed: "/undo", hasSlashChip: false))
         #expect(!OCDiffCommentStore.commentsApply(typed: "  /review x", hasSlashChip: false))
         #expect(!OCDiffCommentStore.commentsApply(typed: "", hasSlashChip: true))
+        // Only a recognised command leaves the comments out; a path stays text.
+        let known = ["review", "/build"]
+        #expect(!OCDiffCommentStore.commentsApply(typed: "/review x", hasSlashChip: false, knownTokens: known))
+        #expect(!OCDiffCommentStore.commentsApply(typed: "/Build", hasSlashChip: false, knownTokens: known))
+        #expect(OCDiffCommentStore.commentsApply(typed: "/etc/hosts explain", hasSlashChip: false, knownTokens: known))
+        #expect(OCDiffCommentStore.commentsApply(typed: "/review x", hasSlashChip: false))
     }
 
     @Test func commentStoreKeepsCommentsPerSessionAndDropsBlankOnes() throws {

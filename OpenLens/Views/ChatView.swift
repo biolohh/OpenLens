@@ -1451,7 +1451,11 @@ struct ChatView: View {
     /// The comments that join the prompt now: none for a slash command (the text must still start
     /// with "/"), which leaves the chips waiting.
     private var appliedLineComments: [OCDiffComment] {
-        guard OCDiffCommentStore.commentsApply(typed: chatClient.inputText, hasSlashChip: selectedSlashAction != nil)
+        guard OCDiffCommentStore.commentsApply(
+            typed: chatClient.inputText,
+            hasSlashChip: selectedSlashAction != nil,
+            knownTokens: availableSlashActions.map(\.token)
+        )
         else { return [] }
         return composerLineComments
     }
