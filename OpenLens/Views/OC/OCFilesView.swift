@@ -155,6 +155,10 @@ private struct OCFileTree: View {
         } else if supportsFilter, !filter.trimmingCharacters(in: .whitespaces).isEmpty {
             ScrollView {
                 LazyVStack(spacing: 0) {
+                    if results == nil {
+                        ProgressView().tint(Color.appSecondary).frame(maxWidth: .infinity, minHeight: 48)
+                            .accessibilityIdentifier("oc.files.searching")
+                    }
                     if let results, results.isEmpty {
                         Text(AppText.ocFilesNoResults)
                             .font(.system(size: 13)).foregroundStyle(Color.appSecondary)
