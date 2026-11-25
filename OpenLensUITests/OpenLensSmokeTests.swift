@@ -483,7 +483,9 @@ final class OpenLensSmokeTests: XCTestCase {
             filter.typeText("a")
             sleep(3)
             snapshot("03-chat-files-filter")
-            XCTAssertTrue(app.buttons["oc.files.row"].firstMatch.exists || app.staticTexts["No results"].exists, "Filter shows neither results nor No results")
+            // A big folder (the no-git session's home) searches slowly: wait for either outcome.
+            let hit = app.buttons["oc.files.row"].firstMatch.waitForExistence(timeout: 25)
+            XCTAssertTrue(hit || app.staticTexts["No results"].exists, "Filter shows neither results nor No results")
             filter.typeText(XCUIKeyboardKey.delete.rawValue)
             sleep(2)
         }
