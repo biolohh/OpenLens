@@ -37,6 +37,13 @@ nonisolated struct V2EventAdapter {
                 "sessionID": sessionID, "locationChanged": true
             ]))
         }
+        // Terminal list changes (`persistent-pty.added/removed/updated`) carry no location: they
+        // go to the session's Terminal tab (OCTerminalStore), never to the chat reducers, so they
+        // neither pass the directory filter nor count as an undecodable event.
+        if type.hasPrefix("persistent-pty.") {
+            if let event = OCTerminalEvent(type: type, data: data) { OCTerminalEvent.post(event) }
+            return nil
+        }
         if let directory {
             guard let location = envelope["location"] as? [String: Any],
                   let eventDirectory = location["directory"] as? String else {

@@ -2,39 +2,64 @@ import Foundation
 import Observation
 import os
 
-/// The Terminal tab's strings (the web's `terminal` plugin, en).
-nonisolated enum OCTerminalText {
-    static let loading = "Loading terminal…"
-    static let listFailed = "Couldn't load terminals"
-    static let unavailable = "Terminals aren't available on this server"
-    static let outdated = "This server is too old for terminals. Update OpenCode on this server."
-    static let createFailed = "Couldn't create a terminal"
-    static let closeFailed = "Couldn't close the terminal"
-    static let disconnected = "Terminal disconnected"
-    static let connectionFailed = "Terminal connection failed"
-    static let serverOutdated = "This server is too old for terminals; update OpenCode on it"
-    static let exited = "Process exited"
-    static let tabTitle = "Terminal"
-    static let newTerminal = "New terminal"
-    static let close = "Close terminal"
-    static let retry = "Try again"
-    static let reconnect = "Reconnect"
-    static let keyboard = "Keyboard"
-
-    static func numbered(_ number: Int) -> String { "Terminal \(number)" }
-
+/// Default terminal titles ("Terminal 2"), numbered like the web's `defaultTitle`.
+nonisolated enum OCTerminalTitles {
     /// The number of a default title such as "Terminal 2".
-    static func titleNumber(_ title: String) -> Int? {
+    static func number(_ title: String) -> Int? {
         guard title.hasPrefix("Terminal ") else { return nil }
         let digits = title.dropFirst("Terminal ".count)
         guard let first = digits.first, first != "0", digits.allSatisfy(\.isNumber) else { return nil }
         return Int(digits)
     }
 
-    /// The lowest default number the given terminals don't use yet (the web's `defaultTitle`).
-    static func nextNumber(after titles: [String]) -> Int {
-        let used = Set(titles.compactMap(titleNumber))
+    /// The lowest default number the given terminals don't use yet.
+    static func next(after titles: [String]) -> Int {
+        let used = Set(titles.compactMap(number))
         return (1...(used.count + 1)).first { !used.contains($0) } ?? 1
+    }
+}
+
+/// A change to a session's terminal list from any client (`persistent-pty.*` on the event stream;
+/// the web's model refreshes the session on `added` / `removed` and patches it on `updated`).
+nonisolated struct OCTerminalEvent: Equatable, Sendable {
+    enum Kind: Equatable, Sendable { case added, removed, updated }
+
+    let kind: Kind
+    let sessionID: String
+    let ptyID: String?
+    /// `updated` carries the terminal's new info.
+    let terminal: OCTerminalInfo?
+
+    static let notification = Notification.Name("OpenLens.terminalListChanged")
+
+    init(kind: Kind, sessionID: String, ptyID: String?, terminal: OCTerminalInfo?) {
+        self.kind = kind
+        self.sessionID = sessionID
+        self.ptyID = ptyID
+        self.terminal = terminal
+    }
+
+    init?(type: String, data: [String: Any]) {
+        guard let sessionID = data["sessionID"] as? String, !sessionID.isEmpty else { return nil }
+        switch type {
+        case "persistent-pty.added": kind = .added
+        case "persistent-pty.removed": kind = .removed
+        case "persistent-pty.updated": kind = .updated
+        default: return nil
+        }
+        self.sessionID = sessionID
+        var info: OCTerminalInfo?
+        if let raw = data["terminal"] as? [String: Any],
+           let json = try? JSONSerialization.data(withJSONObject: raw) {
+            info = try? JSONDecoder().decode(OCTerminalInfo.self, from: json)
+        }
+        terminal = info
+        ptyID = data["ptyID"] as? String ?? info?.id
+    }
+
+    /// Hands the event to the open Terminal tabs (any thread; they read it on the main queue).
+    static func post(_ event: OCTerminalEvent) {
+        NotificationCenter.default.post(name: notification, object: nil, userInfo: ["event": event])
     }
 }
 
@@ -71,6 +96,10 @@ final class OCTerminalConnection {
     @ObservationIgnored private var pendingInput: [Data] = []
     @ObservationIgnored private var connecting: Task<Void, Never>?
     @ObservationIgnored private var attempt = 0
+    /// Asked when the terminal could not be reached (404, socket closed): true while it still
+    /// exists on the server. A terminal closed elsewhere then leaves quietly instead of showing
+    /// "Terminal disconnected".
+    @ObservationIgnored var stillExists: (@MainActor (String) async -> Bool)?
 
     init(ptyID: String, client: OCTerminalClient) {
         self.ptyID = ptyID
@@ -115,7 +144,7 @@ final class OCTerminalConnection {
         } catch {
             guard !Task.isCancelled else { return }
             Logger.api.debug("Terminal connect failed: \(error.localizedDescription, privacy: .public)")
-            fail((error as? OCTerminalClientError) == .notFound ? OCTerminalText.disconnected : OCTerminalText.connectionFailed)
+            ended((error as? OCTerminalClientError) == .notFound ? AppText.ocTerminalDisconnected : AppText.ocTerminalConnectionFailed)
         }
     }
 
@@ -134,7 +163,7 @@ final class OCTerminalConnection {
         switch message {
         case .attached(let inputProtocol, let cols, let rows, let role):
             guard inputProtocol == 1 else {
-                fail(OCTerminalText.serverOutdated)
+                fail(AppText.ocTerminalServerOutdated)
                 return
             }
             isController = role == "controller"
@@ -206,7 +235,24 @@ final class OCTerminalConnection {
         socket = nil
         if status == .exited { return }
         if case .failed = status { return }
-        fail(OCTerminalText.disconnected)
+        ended(AppText.ocTerminalDisconnected)
+    }
+
+    /// The attachment ended without being asked to: checks the terminal still exists before
+    /// showing `message`; when it is gone the store drops it.
+    private func ended(_ message: String) {
+        socket?.close()
+        socket = nil
+        guard let stillExists else {
+            fail(message)
+            return
+        }
+        let current = attempt
+        Task { [weak self, ptyID] in
+            let exists = await stillExists(ptyID)
+            guard let self, exists, self.attempt == current, self.socket == nil else { return }
+            self.fail(message)
+        }
     }
 
     private func fail(_ message: String) {
@@ -245,7 +291,8 @@ final class OCTerminalConnection {
 
 /// The session's terminals as the server lists them, the shown one and its live attachment. Kept
 /// by `OCSessionView`, so the terminal survives switching tabs; it never ends a terminal on its
-/// own: only the tab's close button does, as on the web.
+/// own: only the tab's close button does, as on the web. The list follows other clients through
+/// the event stream, and is read again on every visit and on returning to the foreground.
 @Observable
 final class OCTerminalStore {
     enum Phase: Equatable {
@@ -270,28 +317,79 @@ final class OCTerminalStore {
     @ObservationIgnored private var client: OCTerminalClient?
     @ObservationIgnored private var loadedOnce = false
     @ObservationIgnored private var loadTask: Task<Void, Never>?
+    /// Mobile placement: the first visit to a session without terminals creates one.
+    @ObservationIgnored private var seedsEmpty = true
+    /// Bumped by every create and close, so a list read that raced one is read again.
+    @ObservationIgnored private var mutations = 0
+    @ObservationIgnored private var backgrounded = false
+    @ObservationIgnored private nonisolated(unsafe) var eventObserver: NSObjectProtocol?
 
     init(sessionID: String, directory: String?) {
         self.sessionID = sessionID
         self.directory = directory
+        eventObserver = NotificationCenter.default.addObserver(
+            forName: OCTerminalEvent.notification, object: nil, queue: .main
+        ) { [weak self] note in
+            guard let event = note.userInfo?["event"] as? OCTerminalEvent else { return }
+            MainActor.assumeIsolated { self?.receive(event) }
+        }
+    }
+
+    deinit {
+        if let eventObserver { NotificationCenter.default.removeObserver(eventObserver) }
     }
 
     /// Lists the session's terminals; the first time, an empty list gets a new terminal (the
-    /// narrow-screen web does the same). Reattaches the shown terminal if its socket ended.
-    func appear(apiClient: OpenCodeClient?, isV2: Bool) async {
+    /// narrow-screen web does the same). Later visits re-read the list quietly and reattach the
+    /// shown terminal if its socket ended.
+    func appear(apiClient: OpenCodeClient?, isV2: Bool, seedsEmpty: Bool = true) async {
+        self.seedsEmpty = seedsEmpty
         guard isV2, let apiClient else {
-            phase = .unavailable(OCTerminalText.unavailable)
+            phase = .unavailable(AppText.ocTerminalUnavailable)
             return
         }
-        if client == nil {
-            let endpoint = await apiClient.connectionEndpoint()
-            client = OCTerminalClient(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader)
-        }
+        await updateEndpoint(apiClient)
         if phase == .ready {
             if let connection, case .failed = connection.status { connection.reconnect() } else { connection?.start() }
+            await refresh()
             return
         }
         await reload()
+    }
+
+    /// The server URL or credentials changed (Settings): later calls and a new attachment use them.
+    private func updateEndpoint(_ apiClient: OpenCodeClient) async {
+        let endpoint = await apiClient.connectionEndpoint()
+        guard Self.endpointChanged(client, baseURL: endpoint.baseURL, authHeader: endpoint.authHeader) else { return }
+        let hadClient = client != nil
+        client = OCTerminalClient(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader)
+        guard hadClient, let activeID else { return }
+        connection?.disconnect()
+        connection = nil
+        self.activeID = nil
+        select(activeID)
+    }
+
+    nonisolated static func endpointChanged(_ client: OCTerminalClient?, baseURL: URL, authHeader: String?) -> Bool {
+        guard let client else { return true }
+        return client.baseURL != baseURL || client.authHeader != authHeader
+    }
+
+    /// The app went to the background: detach now, so the suspended socket can't die unseen.
+    func background() {
+        guard phase == .ready else { return }
+        backgrounded = true
+        connection?.disconnect()
+    }
+
+    /// Back in the foreground: a new attachment (snapshot + replay from its tail, so nothing is
+    /// shown twice) and a fresh list.
+    func foreground(apiClient: OpenCodeClient?) async {
+        guard backgrounded else { return }
+        backgrounded = false
+        if let apiClient { await updateEndpoint(apiClient) }
+        connection?.reconnect()
+        await refresh()
     }
 
     /// Lists (and on the first visit seeds) in a task the store owns: leaving the tab cancels the
@@ -318,7 +416,7 @@ final class OCTerminalStore {
             loadedOnce = true
             phase = .ready
             if items.isEmpty {
-                if firstLoad { await create() }
+                if firstLoad, seedsEmpty { await create() }
             } else {
                 select(activeID.flatMap { id in items.first { $0.id == id }?.id } ?? items[0].id)
             }
@@ -332,19 +430,69 @@ final class OCTerminalStore {
         }
     }
 
+    /// Reads the list again without a loading state: terminals opened elsewhere appear, closed
+    /// ones disappear (the shown one hands over to its neighbour, or only `+` stays).
+    func refresh() async {
+        guard let client, phase == .ready else { return }
+        for _ in 0..<2 {
+            let before = mutations
+            guard let items = try? await client.list(sessionID: sessionID) else { return }
+            // A create or close finished meanwhile: this answer may predate it.
+            guard before == mutations else { continue }
+            apply(items)
+            return
+        }
+    }
+
+    func apply(_ items: [OCTerminalInfo]) {
+        let previous = terminals
+        terminals = items
+        guard let activeID else {
+            if let first = items.first { select(first.id) }
+            return
+        }
+        guard !items.contains(where: { $0.id == activeID }) else { return }
+        connection?.disconnect()
+        connection = nil
+        self.activeID = nil
+        guard !items.isEmpty else { return }
+        let index = previous.firstIndex { $0.id == activeID } ?? 0
+        select(items[min(index, items.count - 1)].id)
+    }
+
+    private func receive(_ event: OCTerminalEvent) {
+        guard event.sessionID == sessionID, phase == .ready else { return }
+        switch event.kind {
+        case .added, .removed:
+            Task { await refresh() }
+        case .updated:
+            guard let info = event.terminal, let index = terminals.firstIndex(where: { $0.id == info.id }) else { return }
+            terminals[index] = info
+        }
+    }
+
+    /// Whether the terminal is still on the server; a gone one is dropped from the list.
+    private func exists(_ ptyID: String) async -> Bool {
+        guard let client, let items = try? await client.list(sessionID: sessionID) else { return true }
+        if items.contains(where: { $0.id == ptyID }) { return true }
+        apply(items)
+        return false
+    }
+
     func create() async {
         guard let client, !creating else { return }
         creating = true
         defer { creating = false }
         do {
-            let title = OCTerminalText.numbered(OCTerminalText.nextNumber(after: terminals.map(\.title)))
+            let title = AppText.ocTerminalNumbered(OCTerminalTitles.next(after: terminals.map(\.title)))
             let info = try await client.create(sessionID: sessionID, cwd: directory, title: title)
+            mutations += 1
             if !terminals.contains(where: { $0.id == info.id }) { terminals.append(info) }
             createdIDs.insert(info.id)
             phase = .ready
             select(info.id)
         } catch {
-            actionError = (error as? OCTerminalClientError) == .outdated ? OCTerminalText.outdated : OCTerminalText.createFailed
+            actionError = (error as? OCTerminalClientError) == .outdated ? AppText.ocTerminalOutdated : AppText.ocTerminalCreateFailed
         }
     }
 
@@ -357,6 +505,9 @@ final class OCTerminalStore {
         connection?.disconnect()
         activeID = id
         let next = OCTerminalConnection(ptyID: id, client: client)
+        next.stillExists = { [weak self] ptyID in
+            await self?.exists(ptyID) ?? true
+        }
         connection = next
         next.start()
     }
@@ -371,10 +522,11 @@ final class OCTerminalStore {
         do {
             try await client.remove(ptyID: id)
         } catch {
-            actionError = OCTerminalText.closeFailed
+            actionError = AppText.ocTerminalCloseFailed
             if closingActive { connection?.start() }
             return
         }
+        mutations += 1
         let index = terminals.firstIndex { $0.id == id }
         terminals.removeAll { $0.id == id }
         guard activeID == id else { return }
@@ -389,7 +541,7 @@ final class OCTerminalStore {
     /// The tab label: the shell's live title, else the server's.
     func title(for info: OCTerminalInfo) -> String {
         if info.id == connection?.ptyID, let live = connection?.title, !live.isEmpty { return live }
-        return info.title.isEmpty ? OCTerminalText.tabTitle : info.title
+        return info.title.isEmpty ? AppText.ocTerminalTabTitle : info.title
     }
 
     /// Detaches (leaving the session screen); the terminals keep running on the server.
