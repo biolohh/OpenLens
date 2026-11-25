@@ -378,6 +378,8 @@ final class OpenLensSmokeTests: XCTestCase {
             .waitForExistence(timeout: 8), "Changes tab missing")
         sleep(3)
         if app.descendants(matching: .any).matching(identifier: "oc.placeholder").firstMatch.exists {
+            // "Create Git repository" must exist, and is never tapped: the smoke project is a real folder.
+            XCTAssertTrue(app.buttons["oc.changes.createGit"].waitForExistence(timeout: 5), "No-git state lacks Create Git repository")
             snapshot("03-chat-changes-nogit")
         } else {
             // Same state as the web pair: the "Last turn changes" mode of a git project.
@@ -390,7 +392,17 @@ final class OpenLensSmokeTests: XCTestCase {
                 mode.tap()
                 let turn = app.descendants(matching: .any).matching(identifier: "oc.changes.mode.turn").firstMatch
                 XCTAssertTrue(turn.waitForExistence(timeout: 4), "Mode panel did not open")
+                XCTAssertTrue(app.buttons["oc.changes.mode.git"].exists, "Mode panel lacks Git changes")
                 snapshot("03-chat-changes-modes")
+                // Branch changes only exist off the default branch: open it when offered.
+                let branch = app.buttons["oc.changes.mode.branch"]
+                if branch.exists {
+                    branch.tap()
+                    sleep(3)
+                    snapshot("03-chat-changes-branch")
+                    mode.tap()
+                    XCTAssertTrue(turn.waitForExistence(timeout: 4), "Mode panel did not reopen")
+                }
                 turn.tap()
             }
             sleep(3)
@@ -404,6 +416,43 @@ final class OpenLensSmokeTests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
                     .waitForExistence(timeout: 8), "Expand all did not show a diff")
                 snapshot("03-chat-changes-expanded")
+                // Wrap lines off (sideways scroll) and back on.
+                let wrap = app.buttons["oc.changes.wrap"]
+                XCTAssertTrue(wrap.exists, "Changes lacks the wrap toggle")
+                wrap.tap()
+                sleep(1)
+                snapshot("03-chat-changes-nowrap")
+                wrap.tap()
+                sleep(1)
+                // A line comment: select a diff line, write it, see it in the composer, remove it (never sent).
+                let line = app.descendants(matching: .any).matching(identifier: "oc.diff.line").firstMatch
+                if line.waitForExistence(timeout: 5) {
+                    line.tap()
+                    let add = app.buttons["oc.changes.comment.add"]
+                    XCTAssertTrue(add.waitForExistence(timeout: 4), "Selecting a diff line offers no Add comment")
+                    snapshot("03-chat-changes-line-selected")
+                    add.tap()
+                    let field = app.textFields["oc.changes.comment.field"].exists
+                        ? app.textFields["oc.changes.comment.field"] : app.textViews["oc.changes.comment.field"]
+                    XCTAssertTrue(field.waitForExistence(timeout: 4), "Comment field missing")
+                    field.tap()
+                    field.typeText("smoke comment")
+                    snapshot("03-chat-changes-comment-editor")
+                    app.buttons["oc.changes.comment.submit"].tap()
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.changes.comment").firstMatch
+                        .waitForExistence(timeout: 4), "Comment was not added")
+                    snapshot("03-chat-changes-comment-added")
+                    // It waits in the composer of the Session tab as a chip.
+                    app.buttons["oc.tab.session"].tap()
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.composer.comment").firstMatch
+                        .waitForExistence(timeout: 6), "Comment chip missing in the composer")
+                    snapshot("03-chat-composer-comment")
+                    app.buttons["oc.composer.comment.remove"].firstMatch.tap()
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.composer.comment").firstMatch
+                        .waitForNonExistence(timeout: 4), "Comment chip was not removed")
+                    app.buttons["oc.tab.changes"].tap()
+                    _ = app.buttons["oc.changes.file"].firstMatch.waitForExistence(timeout: 6)
+                }
                 let open = app.buttons["oc.changes.openFile"].firstMatch
                 if open.waitForExistence(timeout: 3) {
                     open.tap()
@@ -425,6 +474,17 @@ final class OpenLensSmokeTests: XCTestCase {
         if allFiles.exists { allFiles.tap() }
         XCTAssertTrue(app.buttons["oc.files.row"].firstMatch.waitForExistence(timeout: 10), "File tree is empty")
         snapshot("03-chat-files")
+        // Typed filter (server-side name search): rows narrow, the clear button restores the tree.
+        let filter = app.textFields["oc.files.filter"]
+        if filter.exists {
+            filter.tap()
+            filter.typeText("a")
+            sleep(3)
+            snapshot("03-chat-files-filter")
+            XCTAssertTrue(app.buttons["oc.files.row"].firstMatch.exists || app.staticTexts["No results"].exists, "Filter shows neither results nor No results")
+            filter.typeText(XCUIKeyboardKey.delete.rawValue)
+            sleep(2)
+        }
         let rows = app.buttons.matching(identifier: "oc.files.row")
         let folder = rows.matching(NSPredicate(format: "value == 'collapsed'")).firstMatch
         if folder.exists {

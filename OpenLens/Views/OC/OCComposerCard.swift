@@ -214,3 +214,53 @@ struct OCComposerSendLabel: View {
         .contentShape(Rectangle())
     }
 }
+
+/// Line comments from the Changes tab, waiting in the composer as chips (the web's comment
+/// chip): file name and lines, the comment text, and a button to drop it. They are folded into
+/// the next prompt as the web's "The user made the following comment regarding …" sentences.
+struct OCComposerCommentChips: View {
+    let sessionID: String?
+    private let store = OCDiffCommentStore.shared
+
+    var body: some View {
+        let items = store.comments(sessionID: sessionID)
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(items) { comment in
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "text.bubble")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.appAccent)
+                            .padding(.top, 2)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("\((comment.file as NSString).lastPathComponent) · \(AppText.ocLineCommentLabel(start: comment.startLine, end: comment.endLine))")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color.appSecondary)
+                                .lineLimit(1)
+                            Text(comment.text)
+                                .font(.system(size: 13))
+                                .foregroundStyle(Color.appPrimary)
+                                .lineLimit(3)
+                        }
+                        Spacer(minLength: 0)
+                        Button { store.remove(comment.id) } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(Color.appSecondary)
+                                .frame(width: 24, height: 24)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("oc.composer.comment.remove")
+                        .accessibilityLabel(AppText.ocLineCommentRemove)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color.appTertiary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("oc.composer.comment")
+                }
+            }
+        }
+    }
+}

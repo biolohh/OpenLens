@@ -19,6 +19,7 @@ struct OCChangesView: View {
 
     @Environment(\.reviewService) private var reviewService
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage(OCDiffSettings.wrapKey) private var wraps = true
     @State private var availability: OCChangesAvailability?
     @State private var mode: OCChangesMode?
     @State private var state: LoadState = .loading
@@ -26,6 +27,14 @@ struct OCChangesView: View {
     @State private var reloadToken = 0
     /// The web's select popover, as a small panel under the header.
     @State private var showsModes = false
+    /// "Create Git repository" in the no-git state: running, and the failure to show.
+    @State private var creatingGit = false
+    @State private var gitError: String?
+    /// The selected diff lines, and the comment being written for them.
+    @State private var selection: OCDiffSelection?
+    @State private var writingComment = false
+    @State private var draft = ""
+    private let comments = OCDiffCommentStore.shared
 
     private struct LoadKey: Hashable {
         let sessionID: String
@@ -80,6 +89,20 @@ struct OCChangesView: View {
             }
             Spacer(minLength: 0)
             if !files.isEmpty {
+                Button {
+                    wraps.toggle()
+                } label: {
+                    Image(systemName: wraps ? "text.alignleft" : "arrow.left.and.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(wraps ? Color.appPrimary : Color.appSecondary)
+                        .frame(width: 28, height: 28)
+                        .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.changes.wrap")
+                .accessibilityLabel(AppText.ocWrapLines)
+                .accessibilityValue(wraps ? "on" : "off")
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         expanded = allOpen ? [] : Set(files.map(\.path))
@@ -142,6 +165,8 @@ struct OCChangesView: View {
                         showsModes = false
                         if option != mode {
                             expanded = []
+                            selection = nil
+                            writingComment = false
                             state = .loading
                             mode = option
                         }
@@ -238,9 +263,107 @@ struct OCChangesView: View {
                 .padding(.horizontal, 16)
                 .frame(height: 40)
                 .background(colorScheme == .dark ? Color.appBackground : Color.appTertiary.opacity(0.5))
-                OCGuardedDiff(file: file)
+                OCGuardedDiff(
+                    file: file,
+                    selection: $selection,
+                    commentedLines: comments.comments(sessionID: session.id, file: commentPath(file)).map { $0.startLine...$0.endLine }
+                )
+                commentArea(for: file)
             }
         }
+    }
+
+    /// The path a comment carries: relative to the session folder, like the web's file paths.
+    private func commentPath(_ file: ReviewFileChange) -> String {
+        OCFileSupport.relative(file.path, to: session.directory)
+    }
+
+    // MARK: Line comments
+
+    @ViewBuilder
+    private func commentArea(for file: ReviewFileChange) -> some View {
+        let path = commentPath(file)
+        let saved = comments.comments(sessionID: session.id, file: path)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(saved) { comment in
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.appAccent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(AppText.ocLineCommentLabel(start: comment.startLine, end: comment.endLine))
+                            .font(.system(size: 11)).foregroundStyle(Color.appSecondary)
+                        Text(comment.text)
+                            .font(.system(size: 13)).foregroundStyle(Color.appPrimary)
+                    }
+                    Spacer(minLength: 0)
+                    Button { comments.remove(comment.id) } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(Color.appSecondary)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("oc.changes.comment.remove")
+                    .accessibilityLabel(AppText.ocLineCommentRemove)
+                }
+                .padding(10)
+                .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .accessibilityIdentifier("oc.changes.comment")
+            }
+            if let current = selection, current.file == file.path {
+                if writingComment {
+                    VStack(alignment: .leading, spacing: 8) {
+                        TextField(AppText.ocLineCommentPlaceholder, text: $draft, axis: .vertical)
+                            .font(.system(size: 13))
+                            .lineLimit(1...5)
+                            .padding(10)
+                            .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                            .accessibilityIdentifier("oc.changes.comment.field")
+                        HStack(spacing: 8) {
+                            Spacer(minLength: 0)
+                            Button(AppText.ocLineCommentCancel) { writingComment = false; draft = "" }
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("oc.changes.comment.cancel")
+                            Button(AppText.ocLineCommentSubmit) {
+                                if comments.add(sessionID: session.id, file: path, selection: current, text: draft) != nil {
+                                    draft = ""
+                                    writingComment = false
+                                    selection = nil
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Color.appPrimary)
+                            .foregroundStyle(Color.appBackground)
+                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .accessibilityIdentifier("oc.changes.comment.submit")
+                        }
+                    }
+                } else {
+                    HStack {
+                        Text(AppText.ocLineCommentLabel(start: current.startLine, end: current.endLine))
+                            .font(.system(size: 13)).foregroundStyle(Color.appSecondary)
+                        Spacer(minLength: 0)
+                        Button { writingComment = true } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "text.bubble").font(.system(size: 12))
+                                Text(AppText.ocLineCommentAdd).font(.system(size: 13, weight: .medium))
+                            }
+                            .foregroundStyle(Color.appPrimary)
+                            .padding(.horizontal, 10)
+                            .frame(height: 28)
+                            .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("oc.changes.comment.add")
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, saved.isEmpty && selection?.file != file.path ? 0 : 16)
+        .padding(.vertical, saved.isEmpty && selection?.file != file.path ? 0 : 10)
     }
 
     private func statusColor(_ status: String) -> Color {
@@ -266,6 +389,30 @@ struct OCChangesView: View {
                     .font(.system(size: 13))
                     .foregroundStyle(Color.appSecondary)
                     .multilineTextAlignment(.center)
+                Button {
+                    Task { await createGit() }
+                } label: {
+                    HStack(spacing: 6) {
+                        if creatingGit { ProgressView().controlSize(.small) }
+                        Text(creatingGit ? AppText.ocCreatingGit : AppText.ocCreateGit)
+                            .font(.system(size: 13, weight: .medium))
+                    }
+                    .foregroundStyle(Color.appPrimary)
+                    .padding(.horizontal, 14)
+                    .frame(height: 32)
+                    .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(creatingGit)
+                .accessibilityIdentifier("oc.changes.createGit")
+                if let gitError {
+                    Text(gitError)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.appDanger)
+                        .multilineTextAlignment(.center)
+                        .accessibilityIdentifier("oc.changes.createGit.error")
+                }
             }
             .accessibilityIdentifier("oc.placeholder")
         }
@@ -295,6 +442,28 @@ struct OCChangesView: View {
         content()
             .padding(32)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: Create Git repository
+
+    /// The web's "Create a Git repository": one request for the session's folder; a second tap
+    /// while it runs does nothing. On success the tab starts over and reads the repository.
+    private func createGit() async {
+        guard !creatingGit else { return }
+        creatingGit = true
+        gitError = nil
+        defer { creatingGit = false }
+        do {
+            try await reviewService.initGitRepository(directory: availability?.directory ?? session.directory)
+            availability = nil
+            mode = nil
+            expanded = []
+            state = .loading
+            reloadToken += 1
+        } catch {
+            guard !(error is CancellationError) else { return }
+            gitError = OCGitInitMessage.text(for: error)
+        }
     }
 
     // MARK: Loading

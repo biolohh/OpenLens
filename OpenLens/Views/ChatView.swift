@@ -827,7 +827,12 @@ struct ChatView: View {
                     agents: chatClient.canSwitchSessionAgent ? composerAgents : [],
                     showsAttach: chatClient.canAttachFiles,
                     openModelPicker: { showModelPicker = true },
-                    field: { composerTokenLayout },
+                    field: {
+                        VStack(alignment: .leading, spacing: 6) {
+                            OCComposerCommentChips(sessionID: chatClient.currentSession?.id)
+                            composerTokenLayout
+                        }
+                    },
                     attach: { composerAttachMenu },
                     action: { composerActionButton }
                 )
@@ -1195,11 +1200,14 @@ struct ChatView: View {
     /// sends, returning false when there is nothing to send. If the client
     /// leaves that text in place, the skill mentions turn back into chips.
     private func commitComposerChips() -> Bool {
-        guard selectedSlashAction != nil || !attachedSkills.isEmpty else { return true }
+        guard selectedSlashAction != nil || !attachedSkills.isEmpty || !composerLineComments.isEmpty else { return true }
 
         let composedText = composerSendText
         guard !composedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
 
+        if let sessionID = chatClient.currentSession?.id, !composerLineComments.isEmpty {
+            OCDiffCommentStore.shared.clear(sessionID: sessionID)
+        }
         chatClient.inputText = composedText
         selectedSlashAction = nil
         attachedSkills = []
@@ -1416,12 +1424,19 @@ struct ChatView: View {
 
     private var composerSendText: String {
         let text = selectedSlashAction.map(composedSlashActionText(for:)) ?? chatClient.inputText
-        guard !attachedSkills.isEmpty else { return text }
-
-        return SkillMention.composing(
+        let base = attachedSkills.isEmpty ? text : SkillMention.composing(
             text.trimmingCharacters(in: .whitespacesAndNewlines),
             mentioning: attachedSkills.map(\.id)
         )
+        // Line comments from the Changes tab go first, as the web's comment sentences.
+        guard !composerLineComments.isEmpty else { return base }
+        return OCDiffCommentStore.composedPrompt(comments: composerLineComments, typed: base)
+    }
+
+    /// Changes-tab line comments waiting for the next prompt (OC shell only).
+    private var composerLineComments: [OCDiffComment] {
+        guard ocShell != nil else { return [] }
+        return OCDiffCommentStore.shared.comments(sessionID: chatClient.currentSession?.id)
     }
 
     private var slashQuery: String? {

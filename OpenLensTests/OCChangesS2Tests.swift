@@ -21,13 +21,17 @@ nonisolated final class S2RecordingTransport: OpenCodeTransport, @unchecked Send
         let url = try #require(request.url)
         lock.lock(); seen.append(request); lock.unlock()
         let key = "\(request.httpMethod ?? "GET") \(url.path)"
-        let route = routes[key] ?? .status(404, #"{"error":"RouteNotFound"}"#)
+        lock.lock(); let override = overrides[key]; lock.unlock()
+        let route = override ?? routes[key] ?? .status(404, #"{"error":"RouteNotFound"}"#)
         return (route.body, HTTPURLResponse(url: url, statusCode: route.statusCode, httpVersion: nil, headerFields: nil)!)
     }
 
     func makeEventStream(request: URLRequest, deliveryQueue: DispatchQueue, callbacks: OpenCodeEventStreamCallbacks) -> any OpenCodeEventStream {
         S2UnusedEventStream()
     }
+
+    private var overrides: [String: Route] = [:]
+    func set(_ key: String, _ route: Route) { lock.lock(); overrides[key] = route; lock.unlock() }
 
     func requests() -> [URLRequest] { lock.lock(); defer { lock.unlock() }; return seen }
     func requests(matching key: String) -> [URLRequest] {
@@ -129,5 +133,235 @@ struct OCChangesS2Tests {
             "POST /api/vcs/init": .status(409, #"{"_tag":"ConflictError","message":"Already a repository"}"#),
         ])
         await #expect(throws: OpenCodeError.self) { try await service.initGitRepository(directory: "/work/site") }
+    }
+
+    @Test func afterCreatingTheRepositoryTheNextAvailabilityReadsGitModes() async throws {
+        let (service, transport) = try await makeService(routes: [
+            "GET /api/project": .ok(#"[{"id":"p1","worktree":"/work/site"}]"#),
+            "POST /api/vcs/init": .status(204, ""),
+            "GET /api/vcs": .ok(#"{"location":{"directory":"/work/site"},"data":{"branch":{"current":"main","default":"main"}}}"#),
+        ])
+        let before = try await service.changesAvailability(sessionID: "s", directory: "/work/site", projectID: "p1")
+        #expect(!before.isGit)
+        #expect(before.directory == "/work/site")
+
+        try await service.initGitRepository(directory: before.directory)
+        transport.set("GET /api/project", .ok(#"[{"id":"p1","worktree":"/work/site","vcs":"git"}]"#))
+
+        let after = try await service.changesAvailability(sessionID: "s", directory: "/work/site", projectID: "p1")
+        #expect(after.isGit)
+        #expect(after.modes == [.git, .turn])
+    }
+
+    @Test func gitInitFailureTextPrefersTheServerMessage() {
+        let payload = OpenCodeAPIErrorPayload(tag: "ConflictError", message: "Already a repository", kind: nil, field: nil, resource: nil, service: nil, reference: nil)
+        #expect(OCGitInitMessage.text(for: OpenCodeError.apiError(statusCode: 409, payload: payload)) == "Already a repository")
+        #expect(OCGitInitMessage.text(for: URLError(.timedOut)) == "The server took too long to answer")
+        #expect(OCGitInitMessage.text(for: OCVCSError.unavailable) == "Request failed")
+    }
+
+    // MARK: Large and binary diffs
+
+    private func change(additions: Int, deletions: Int, patch: String? = nil) -> ReviewFileChange {
+        ReviewFileChange(diff: OCFileDiff(file: "a.txt", status: "modified", additions: additions, deletions: deletions, patchText: patch))
+    }
+
+    @Test func diffsAboveFiveHundredChangedLinesWaitForRenderAnyway() {
+        #expect(OCFileSupport.maximumDiffChangedLines == 500)
+        #expect(!OCFileSupport.isTooLarge(change(additions: 300, deletions: 200)))
+        #expect(OCFileSupport.isTooLarge(change(additions: 300, deletions: 201)))
+        #expect(AppText.ocLargeDiffTitle == "Diff too large to render")
+        #expect(AppText.ocLargeDiffMeta(limit: 500, current: 501) == "Limit: 500 changed lines. Current: 501 changed lines.")
+    }
+
+    @Test func aDiffWithoutLinesIsBinary() {
+        #expect(OCFileSupport.isBinary(change(additions: 0, deletions: 0)))
+        #expect(!OCFileSupport.isBinary(change(additions: 1, deletions: 0, patch: "@@ -0,0 +1 @@\n+x\n")))
+        #expect(AppText.ocBinaryFile == "Binary file")
+    }
+
+    // MARK: Syntax highlighting
+
+    private func kinds(_ line: String, _ language: OCSyntaxLanguage) -> [(String, OCSyntaxKind)] {
+        OCSyntaxHighlighter.highlight(lines: [line], language: language)[0].map { ($0.text, $0.kind) }
+    }
+
+    private func has(_ segments: [(String, OCSyntaxKind)], _ text: String, _ kind: OCSyntaxKind) -> Bool {
+        segments.contains { $0.0.trimmingCharacters(in: .whitespaces) == text && $0.1 == kind }
+    }
+
+    @Test func languagesAreDetectedFromTheFileName() {
+        #expect(OCSyntaxLanguage.detect(path: "a/b/File.swift") == .swift)
+        #expect(OCSyntaxLanguage.detect(path: "x.tsx") == .script)
+        #expect(OCSyntaxLanguage.detect(path: "x.js") == .script)
+        #expect(OCSyntaxLanguage.detect(path: "x.py") == .python)
+        #expect(OCSyntaxLanguage.detect(path: "package.json") == .json)
+        #expect(OCSyntaxLanguage.detect(path: "ci.yml") == .yaml)
+        #expect(OCSyntaxLanguage.detect(path: "README.md") == .markdown)
+        #expect(OCSyntaxLanguage.detect(path: "run.sh") == .shell)
+        #expect(OCSyntaxLanguage.detect(path: "Dockerfile") == .shell)
+        #expect(OCSyntaxLanguage.detect(path: "index.html") == .html)
+        #expect(OCSyntaxLanguage.detect(path: "a.css") == .css)
+        #expect(OCSyntaxLanguage.detect(path: "m.cpp") == .c)
+        #expect(OCSyntaxLanguage.detect(path: "notes.txt") == .plain)
+    }
+
+    @Test func segmentsAlwaysRebuildTheLine() {
+        let samples: [(String, OCSyntaxLanguage)] = [
+            ("let x = \"a b\" // note", .swift), ("const f = (a) => `t${a}`; /* c */", .script),
+            ("def f(x): return 'a' # c", .python), ("{\"k\": [1, 2.5, true]}", .json), ("- name: x # c", .yaml),
+            ("## Title `code` [l](u)", .markdown), ("echo \"$HOME\" # c", .shell),
+            ("<a href=\"x\">y</a>", .html), ("a { color: #fff; margin: 4px }", .css), ("#include <stdio.h>", .c),
+        ]
+        for (line, language) in samples {
+            #expect(kinds(line, language).map(\.0).joined() == line, "\(language)")
+        }
+    }
+
+    @Test func swiftColoursKeywordsStringsCommentsNumbersTypesAndCalls() {
+        let line = kinds("let value: Int = 42 // answer", .swift)
+        #expect(has(line, "let", .keyword))
+        #expect(has(line, "Int", .type))
+        #expect(has(line, "42", .number))
+        #expect(has(line, "// answer", .comment))
+        let call = kinds("print(\"hi\")", .swift)
+        #expect(has(call, "print", .function))
+        #expect(has(call, "\"hi\"", .string))
+    }
+
+    @Test func scriptAndPythonAndCFamily() {
+        #expect(has(kinds("const a = await fetch('x')", .script), "const", .keyword))
+        #expect(has(kinds("const a = await fetch('x')", .script), "'x'", .string))
+        #expect(has(kinds("def run(self): # go", .python), "def", .keyword))
+        #expect(has(kinds("def run(self): # go", .python), "# go", .comment))
+        #expect(has(kinds("#include <stdio.h>", .c), "#include", .keyword))
+        #expect(has(kinds("int main(void) { return 0; }", .c), "int", .keyword))
+    }
+
+    @Test func blockCommentsAndTripleStringsCarryAcrossLines() {
+        let block = OCSyntaxHighlighter.highlight(lines: ["/* start", "middle", "end */ let a = 1"], language: .swift)
+        #expect(block[1].map(\.kind) == [.comment])
+        #expect(block[2].first?.kind == .comment)
+        #expect(block[2].contains { $0.text.trimmingCharacters(in: .whitespaces) == "let" && $0.kind == .keyword })
+        let triple = OCSyntaxHighlighter.highlight(lines: ["x = \"\"\"doc", "still doc", "end\"\"\"; y = 1"], language: .python)
+        #expect(triple[1].map(\.kind) == [.string])
+        #expect(triple[2].contains { $0.text.trimmingCharacters(in: .whitespaces) == "1" && $0.kind == .number })
+    }
+
+    @Test func jsonKeysValuesAndLiterals() {
+        let line = kinds(#"  "name": "x", "n": 3, "ok": true"#, .json)
+        #expect(has(line, "\"name\"", .property))
+        #expect(has(line, "\"x\"", .string))
+        #expect(has(line, "3", .number))
+        #expect(has(line, "true", .keyword))
+    }
+
+    @Test func yamlKeysCommentsAndValues() {
+        let line = kinds("  - image: \"nginx\" # web", .yaml)
+        #expect(has(line, "image", .property))
+        #expect(has(line, "\"nginx\"", .string))
+        #expect(has(line, "# web", .comment))
+        #expect(has(kinds("replicas: 3", .yaml), "3", .number))
+    }
+
+    @Test func markdownHeadingsFencesListsAndInlineCode() {
+        let lines = OCSyntaxHighlighter.highlight(lines: ["# Title", "- item `code` [t](u)", "```swift", "let a = 1", "```", "plain"], language: .markdown)
+        #expect(lines[0].map(\.kind) == [.keyword])
+        #expect(lines[1].contains { $0.text == "`code`" && $0.kind == .string })
+        #expect(lines[3].map(\.kind) == [.string])
+        #expect(lines[5].map(\.kind) == [.plain])
+    }
+
+    @Test func htmlTagsAttributesAndComments() {
+        let line = kinds("<div class=\"a\">hi</div>", .html)
+        #expect(has(line, "<div", .tag))
+        #expect(has(line, "class", .property))
+        #expect(has(line, "\"a\"", .string))
+        #expect(has(line, "</div", .tag))
+        #expect(OCSyntaxHighlighter.highlight(lines: ["<!-- a", "b -->"], language: .html)[1].first?.kind == .comment)
+    }
+
+    @Test func shellAndCSS() {
+        let sh = kinds("if [ -n \"$HOME\" ]; then # go", .shell)
+        #expect(has(sh, "if", .keyword))
+        #expect(has(sh, "$HOME", .property))
+        #expect(has(sh, "# go", .comment))
+        let css = kinds("  color: #fff; margin: 4px;", .css)
+        #expect(has(css, "color", .property))
+        #expect(has(css, "#fff", .number))
+        #expect(has(css, "4px", .number))
+    }
+
+    @Test func diffHighlightKeepsRemovedAndAddedStreamsApart() {
+        // The removed line opens a block comment in the old file; the added one does not in the new file.
+        let result = OCSyntaxHighlighter.highlight(
+            diffLines: [
+                (text: "/* old", isRemoved: true, isAdded: false),
+                (text: "let a = 1", isRemoved: false, isAdded: true),
+            ],
+            language: .swift
+        )
+        #expect(result[0].map(\.kind) == [.comment])
+        #expect(result[1].contains { $0.kind == .keyword })
+    }
+
+    @Test func plainTextIsOneSegment() {
+        #expect(OCSyntaxHighlighter.highlight(lines: ["hello world"], language: .plain) == [[OCSyntaxSegment(text: "hello world", kind: .plain)]])
+    }
+
+    @Test func diffRenderBuildsSegmentsPerRowAndCachesThem() {
+        let file = change(additions: 1, deletions: 1, patch: "--- a/x.swift\n+++ b/x.swift\n@@ -1,2 +1,2 @@\n keep\n-let a = 1\n+let a = 2\n")
+        let renamed = ReviewFileChange(path: "x.swift", status: "modified", additions: 1, deletions: 1, beforeText: "keep\nlet a = 1\n", afterText: "keep\nlet a = 2\n")
+        let render = OCDiffRender.build(file: renamed)
+        #expect(render.lines.count == render.segments.count)
+        #expect(render.segments.contains { $0.contains { $0.kind == .keyword } })
+        #expect(OCDiffRender.build(file: renamed) === render)
+        _ = file
+    }
+
+    // MARK: Line selection and comments
+
+    private func lines(_ numbers: [Int?]) -> [OCDiffLineInfo] {
+        numbers.enumerated().map { OCDiffLineInfo(number: $1, text: "row\($0)") }
+    }
+
+    @Test func tappingLinesSelectsExtendsAndClears() throws {
+        let rows = lines([10, 11, 12, 13])
+        let first = try #require(OCDiffSelection.toggled(nil, file: "a", row: 1, lines: rows))
+        #expect(first.startLine == 11 && first.endLine == 11 && first.rows == 1...1)
+        let range = try #require(OCDiffSelection.toggled(first, file: "a", row: 3, lines: rows))
+        #expect(range.startLine == 11 && range.endLine == 13 && range.rows == 1...3)
+        #expect(range.preview == "row1\nrow2\nrow3")
+        let restarted = try #require(OCDiffSelection.toggled(range, file: "a", row: 0, lines: rows))
+        #expect(restarted.rows == 0...0)
+        #expect(OCDiffSelection.toggled(first, file: "a", row: 1, lines: rows) == nil)
+        let otherFile = try #require(OCDiffSelection.toggled(first, file: "b", row: 2, lines: rows))
+        #expect(otherFile.file == "b" && otherFile.rows == 2...2)
+    }
+
+    @Test func commentSentencesFollowTheWebWording() {
+        let one = OCDiffComment(id: UUID(), sessionID: "s", file: "src/a.swift", startLine: 7, endLine: 7, text: "Why?", preview: "")
+        let many = OCDiffComment(id: UUID(), sessionID: "s", file: "src/a.swift", startLine: 7, endLine: 9, text: "Rename", preview: "")
+        #expect(one.note == "The user made the following comment regarding line 7 of src/a.swift: Why?")
+        #expect(many.note == "The user made the following comment regarding lines 7 through 9 of src/a.swift: Rename")
+        #expect(OCDiffCommentStore.composedPrompt(comments: [one, many], typed: "  fix it ") ==
+            one.note + "\n\n" + many.note + "\n\nfix it")
+        #expect(OCDiffCommentStore.composedPrompt(comments: [one], typed: "") == one.note)
+        #expect(OCDiffCommentStore.composedPrompt(comments: [], typed: "hi") == "hi")
+    }
+
+    @Test func commentStoreKeepsCommentsPerSessionAndDropsBlankOnes() throws {
+        let store = OCDiffCommentStore()
+        let selection = OCDiffSelection(file: "a", rows: 0...1, startLine: 3, endLine: 4, preview: "p")
+        let added = try #require(store.add(sessionID: "s1", file: "a", selection: selection, text: "  note  "))
+        #expect(added.text == "note")
+        #expect(store.add(sessionID: "s1", file: "a", selection: selection, text: "   ") == nil)
+        _ = store.add(sessionID: "s2", file: "b", selection: selection, text: "other")
+        #expect(store.comments(sessionID: "s1").map(\.text) == ["note"])
+        #expect(store.comments(sessionID: "s1", file: "b").isEmpty)
+        store.remove(added.id)
+        #expect(store.comments(sessionID: "s1").isEmpty)
+        store.clear(sessionID: "s2")
+        #expect(store.all.isEmpty)
     }
 }
