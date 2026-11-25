@@ -222,10 +222,193 @@ struct OCTerminalKeysTests {
     }
 
     @Test func defaultTitlesNumberLikeTheWeb() {
-        #expect(OCTerminalText.titleNumber("Terminal 2") == 2)
-        #expect(OCTerminalText.titleNumber("docker@host: ~") == nil)
-        #expect(OCTerminalText.titleNumber("Terminal 02") == nil)
-        #expect(OCTerminalText.nextNumber(after: []) == 1)
-        #expect(OCTerminalText.nextNumber(after: ["Terminal 1", "bash", "Terminal 3"]) == 2)
+        #expect(OCTerminalTitles.number("Terminal 2") == 2)
+        #expect(OCTerminalTitles.number("docker@host: ~") == nil)
+        #expect(OCTerminalTitles.number("Terminal 02") == nil)
+        #expect(OCTerminalTitles.next(after: []) == 1)
+        #expect(OCTerminalTitles.next(after: ["Terminal 1", "bash", "Terminal 3"]) == 2)
+    }
+}
+
+struct OCTerminalPaletteTests {
+    /// One table for both appearances, the web emulator's (ghostty-web) defaults.
+    @Test func ansiColoursAreTheWebEmulatorTable() {
+        #expect(OCTerminalPalette.rgb(.ansi(1)) == .init(0xcd, 0x31, 0x31))
+        #expect(OCTerminalPalette.rgb(.ansi(2)) == .init(0x0d, 0xbc, 0x79))
+        #expect(OCTerminalPalette.rgb(.ansi(12)) == .init(0x3b, 0x8e, 0xea))
+        #expect(OCTerminalPalette.rgb(.ansi(15)) == .init(0xff, 0xff, 0xff))
+        #expect(OCTerminalPalette.ansi.count == 16)
+    }
+
+    @Test func the256ColourTableIsXterms() {
+        #expect(OCTerminalPalette.rgb(.indexed(196)) == .init(255, 0, 0))
+        #expect(OCTerminalPalette.rgb(.indexed(208)) == .init(255, 135, 0))
+        #expect(OCTerminalPalette.rgb(.indexed(27)) == .init(0, 95, 255))
+        #expect(OCTerminalPalette.rgb(.indexed(232)) == .init(8, 8, 8))
+        #expect(OCTerminalPalette.rgb(.indexed(244)) == .init(128, 128, 128))
+        #expect(OCTerminalPalette.rgb(.indexed(255)) == .init(238, 238, 238))
+        #expect(OCTerminalPalette.rgb(.rgb(1, 2, 3)) == .init(1, 2, 3))
+    }
+}
+
+struct OCTerminalSelectionTests {
+    private func lines(_ texts: [String], cols: Int = 20) -> [OCTerminalLine] {
+        var term = OCTerminalEmulator(cols: cols, rows: texts.count)
+        term.feed(texts.joined(separator: "\r\n"))
+        return term.lines(showCursor: false)
+    }
+
+    @Test func selectionAcrossLinesCopiesCellsInReadingOrder() {
+        let all = lines(["first line", "second line", "third"])
+        // Dragged upwards: head before anchor still reads top to bottom.
+        let selection = OCTerminalSelection(
+            anchor: OCTerminalPoint(line: all[2].id, column: 2),
+            head: OCTerminalPoint(line: all[0].id, column: 6)
+        )
+        #expect(selection.text(in: all) == "line\nsecond line\nthi")
+        #expect(selection.columns(line: all[1].id) == 0...OCTerminalSelection.lineEnd)
+        #expect(selection.columns(line: all[0].id) == 6...OCTerminalSelection.lineEnd)
+        #expect(selection.columns(line: all[2].id) == 0...2)
+    }
+
+    @Test func wideCharactersCountTwoCells() {
+        // "a界b": a at 0, 界 at 1–2, b at 3.
+        let all = lines(["a界b", "日本x"])
+        #expect(all[0].cellStart(2) == 1)
+        #expect(all[0].cellStart(3) == 3)
+        #expect(all[0].text(columns: 2...3) == "界b")
+        let selection = OCTerminalSelection(
+            anchor: OCTerminalPoint(line: all[0].id, column: 2),
+            head: OCTerminalPoint(line: all[1].id, column: 2)
+        )
+        #expect(selection.text(in: all) == "界b\n日本")
+    }
+
+    @Test func longPressTakesTheWordUnderTheFinger() {
+        let line = lines(["ls -la /home/docker"])[0]
+        #expect(line.word(at: 9) == 7...18)
+        #expect(line.word(at: 2) == nil)
+    }
+
+    @Test func quoteTextIsTrimmedLikeTheWeb() {
+        #expect(OCTerminalSelection.quoteText("\n\nopenlens-ref\nblack red  \n\n") == "openlens-ref\nblack red")
+        let all = lines(["one", "two"])
+        let everything = OCTerminalSelection.all(all)
+        #expect(everything?.text(in: all) == "one\ntwo")
+    }
+}
+
+struct OCTerminalQuoteTests {
+    @Test func quoteBlockIsTheWebsFormat() {
+        var quote = OCDiffComment.terminalQuote(sessionID: "s", text: "openlens-ref\n\nblack red")
+        #expect(quote.quoteBlock == "From the terminal:\n> openlens-ref\n>\n> black red")
+        quote.text = "why red?"
+        #expect(quote.quoteBlock == "From the terminal:\n> openlens-ref\n>\n> black red\n\nwhy red?")
+    }
+
+    @Test func quotesLeadThePromptThenTypedTextAndComments() {
+        let quote = OCDiffComment.terminalQuote(sessionID: "s", text: "ls output")
+        let comment = OCDiffComment(
+            id: UUID(), sessionID: "s", file: "a.swift", startLine: 2, endLine: 2, text: "fix", preview: ""
+        )
+        let prompt = OCDiffCommentStore.composedPrompt(comments: [comment, quote], typed: " look ")
+        #expect(prompt == "From the terminal:\n> ls output\n\nlook\nThe user made the following comment regarding line 2 of a.swift: fix")
+        #expect(OCDiffCommentStore.composedPrompt(comments: [quote], typed: "") == "From the terminal:\n> ls output")
+    }
+
+    @Test @MainActor func quotesStayOutOfTheChangesTabsComments() {
+        let store = OCDiffCommentStore()
+        store.addQuote(sessionID: "q-test", text: "x")
+        #expect(store.comments(sessionID: "q-test").count == 1)
+        #expect(store.comments(sessionID: "q-test", file: "").isEmpty)
+        let id = store.comments(sessionID: "q-test")[0].id
+        store.setQuoteComment(id, text: " note ")
+        #expect(store.comments(sessionID: "q-test")[0].text == "note")
+        store.remove(id)
+        #expect(store.comments(sessionID: "q-test").isEmpty)
+    }
+}
+
+struct OCTerminalFullScreenTests {
+    @Test func alternateScreenHidesTheHistoryAndRestoresIt() {
+        var term = OCTerminalEmulator(cols: 10, rows: 3)
+        term.feed("a\r\nb\r\nc\r\nd\r\ne")
+        #expect(term.historyCount == 2)
+        let before = term.lines(showCursor: false).map(\.text)
+        term.feed("\u{1b}[?1049h\u{1b}[H\u{1b}[2Jless view")
+        #expect(term.lines(showCursor: false).map(\.text) == ["less view", "", ""])
+        term.feed("\u{1b}[?1049l")
+        #expect(term.historyCount == 2)
+        #expect(term.lines(showCursor: false).map(\.text) == before)
+    }
+
+    @Test func scrollRegionScrollsOnlyInside() {
+        var term = OCTerminalEmulator(cols: 10, rows: 4)
+        term.feed("\u{1b}[?1049h\u{1b}[1;1Htop\u{1b}[2;3r\u{1b}[2;1Hx\r\ny\r\nz")
+        #expect(term.screenText == ["top", "y", "z", ""])
+        #expect(term.historyCount == 0)
+    }
+}
+
+struct OCTerminalSyncTests {
+    @Test func persistentPtyEventsDecode() {
+        let added = OCTerminalEvent(type: "persistent-pty.added", data: [
+            "sessionID": "ses_1",
+            "terminal": ["id": "pty_1", "title": "Terminal 1", "status": "running"],
+        ])
+        #expect(added?.kind == .added)
+        #expect(added?.ptyID == "pty_1")
+        #expect(added?.terminal?.title == "Terminal 1")
+        let removed = OCTerminalEvent(type: "persistent-pty.removed", data: ["sessionID": "ses_1", "ptyID": "pty_1"])
+        #expect(removed == OCTerminalEvent(kind: .removed, sessionID: "ses_1", ptyID: "pty_1", terminal: nil))
+        #expect(OCTerminalEvent(type: "persistent-pty.added", data: [:]) == nil)
+    }
+
+    /// The events carry no location: with a directory filter they must not count as undecodable.
+    @Test func adapterRoutesTerminalEventsAroundTheChat() throws {
+        var adapter = V2EventAdapter()
+        let envelope: [String: Any] = [
+            "type": "persistent-pty.removed", "data": ["sessionID": "ses_1", "ptyID": "pty_1"],
+        ]
+        #expect(try adapter.event(envelope, directory: "/home/docker") == nil)
+    }
+
+    @Test func aChangedEndpointRebuildsTheClient() throws {
+        let url = try #require(URL(string: "http://host:4097"))
+        let client = OCTerminalClient(baseURL: url, authHeader: "Basic a")
+        #expect(OCTerminalStore.endpointChanged(nil, baseURL: url, authHeader: nil))
+        #expect(!OCTerminalStore.endpointChanged(client, baseURL: url, authHeader: "Basic a"))
+        #expect(OCTerminalStore.endpointChanged(client, baseURL: url, authHeader: "Basic b"))
+        #expect(OCTerminalStore.endpointChanged(client, baseURL: try #require(URL(string: "http://other:4097")), authHeader: "Basic a"))
+    }
+
+    @Test @MainActor func listFromElsewhereDropsAClosedTerminalAndKeepsTheRest() throws {
+        let store = OCTerminalStore(sessionID: "ses_1", directory: nil)
+        let one = OCTerminalInfo(id: "pty_1", title: "Terminal 1", cwd: nil, status: nil, sessionID: "ses_1", size: nil, output: nil)
+        let two = OCTerminalInfo(id: "pty_2", title: "Terminal 2", cwd: nil, status: nil, sessionID: "ses_1", size: nil, output: nil)
+        store.apply([one, two])
+        #expect(store.terminals.map(\.id) == ["pty_1", "pty_2"])
+        store.apply([two])
+        #expect(store.terminals.map(\.id) == ["pty_2"])
+        store.apply([])
+        #expect(store.terminals.isEmpty)
+        #expect(store.activeID == nil)
+    }
+
+    /// Rotation and keyboard changes go through the pane size: a landscape pane is more columns,
+    /// fewer rows, and the emulator follows the server's new size without losing the history.
+    @Test @MainActor func landscapePaneMeansMoreColumns() {
+        let metrics = OCTerminalMetrics.current(size: 13)
+        let portrait = metrics.cells(in: CGSize(width: 366, height: 600))
+        let landscape = metrics.cells(in: CGSize(width: 780, height: 260))
+        #expect(landscape.cols > portrait.cols)
+        #expect(landscape.rows < portrait.rows)
+        var term = OCTerminalEmulator(cols: portrait.cols, rows: portrait.rows)
+        term.feed((1...60).map(String.init).joined(separator: "\r\n"))
+        let total = term.lines(showCursor: false).count
+        term.resize(cols: landscape.cols, rows: landscape.rows)
+        #expect(term.cols == landscape.cols)
+        #expect(term.lines(showCursor: false).map(\.text).contains("60"))
+        #expect(term.lines(showCursor: false).count <= total)
     }
 }
