@@ -14,13 +14,20 @@ extension AppText {
     static let ocCreateGit = "Create Git repository"
     static let ocCreatingGit = "Creating…"
     static let ocLineCommentPlaceholder = "Add comment"
-    static let ocLineCommentAdd = "Add comment"
     static let ocLineCommentSubmit = "Comment"
     static let ocLineCommentCancel = "Cancel"
     static let ocLineCommentRemove = "Remove comment"
     static let ocGitTimeout = "The server took too long to answer"
-    static func ocLineCommentLabel(start: Int, end: Int) -> String {
-        start == end ? "Line \(start)" : "Lines \(start)–\(end)"
+    /// "line 4" / "lines 4-9", as the web names a selection.
+    static func ocLineCommentRange(start: Int, end: Int) -> String {
+        start == end ? "line \(start)" : "lines \(start)-\(end)"
+    }
+    static func ocLineCommentSaved(start: Int, end: Int) -> String { "Comment on " + ocLineCommentRange(start: start, end: end) }
+    static func ocLineCommentEditing(start: Int, end: Int) -> String { "Commenting on " + ocLineCommentRange(start: start, end: end) }
+    /// The composer chip's second line: "hello.txt:1" / "hello.txt:1-3".
+    static func ocLineCommentChipLocation(file: String, start: Int, end: Int) -> String {
+        let name = (file as NSString).lastPathComponent
+        return start == end ? "\(name):\(start)" : "\(name):\(start)-\(end)"
     }
 }
 

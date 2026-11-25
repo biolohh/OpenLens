@@ -364,4 +364,11 @@ struct OCChangesS2Tests {
         store.clear(sessionID: "s2")
         #expect(store.all.isEmpty)
     }
+
+    @Test func commentLabelsFollowTheWebWording() {
+        #expect(AppText.ocLineCommentSaved(start: 1, end: 1) == "Comment on line 1")
+        #expect(AppText.ocLineCommentEditing(start: 2, end: 5) == "Commenting on lines 2-5")
+        #expect(AppText.ocLineCommentChipLocation(file: "src/hello.txt", start: 1, end: 1) == "hello.txt:1")
+        #expect(AppText.ocLineCommentChipLocation(file: "src/hello.txt", start: 1, end: 3) == "hello.txt:1-3")
+    }
 }

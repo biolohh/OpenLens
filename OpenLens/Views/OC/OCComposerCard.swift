@@ -228,19 +228,18 @@ struct OCComposerCommentChips: View {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(items) { comment in
                     HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "text.bubble")
-                            .font(.system(size: 12))
-                            .foregroundStyle(Color.appAccent)
-                            .padding(.top, 2)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("\((comment.file as NSString).lastPathComponent) · \(AppText.ocLineCommentLabel(start: comment.startLine, end: comment.endLine))")
-                                .font(.system(size: 11))
-                                .foregroundStyle(Color.appSecondary)
-                                .lineLimit(1)
+                        VStack(alignment: .leading, spacing: 3) {
                             Text(comment.text)
-                                .font(.system(size: 13))
+                                .font(.system(size: 13, weight: .semibold))
                                 .foregroundStyle(Color.appPrimary)
                                 .lineLimit(3)
+                            HStack(spacing: 5) {
+                                OCFileTypeIcon(name: (comment.file as NSString).lastPathComponent)
+                                Text(AppText.ocLineCommentChipLocation(file: comment.file, start: comment.startLine, end: comment.endLine))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(Color.appSecondary)
+                                    .lineLimit(1)
+                            }
                         }
                         Spacer(minLength: 0)
                         Button { store.remove(comment.id) } label: {

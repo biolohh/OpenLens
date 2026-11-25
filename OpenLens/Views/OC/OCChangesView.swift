@@ -32,7 +32,6 @@ struct OCChangesView: View {
     @State private var gitError: String?
     /// The selected diff lines, and the comment being written for them.
     @State private var selection: OCDiffSelection?
-    @State private var writingComment = false
     @State private var draft = ""
     private let comments = OCDiffCommentStore.shared
 
@@ -89,20 +88,6 @@ struct OCChangesView: View {
             }
             Spacer(minLength: 0)
             if !files.isEmpty {
-                Button {
-                    wraps.toggle()
-                } label: {
-                    Image(systemName: wraps ? "text.alignleft" : "arrow.left.and.right")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(wraps ? Color.appPrimary : Color.appSecondary)
-                        .frame(width: 28, height: 28)
-                        .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("oc.changes.wrap")
-                .accessibilityLabel(AppText.ocWrapLines)
-                .accessibilityValue(wraps ? "on" : "off")
                 Button {
                     withAnimation(.easeOut(duration: 0.16)) {
                         expanded = allOpen ? [] : Set(files.map(\.path))
@@ -166,7 +151,6 @@ struct OCChangesView: View {
                         if option != mode {
                             expanded = []
                             selection = nil
-                            writingComment = false
                             state = .loading
                             mode = option
                         }
@@ -186,6 +170,27 @@ struct OCChangesView: View {
                     .buttonStyle(.plain)
                     .accessibilityIdentifier("oc.changes.mode.\(option.rawValue)")
                 }
+                Rectangle().fill(Color.appSeparator).frame(height: 1)
+                // The web keeps "Wrap lines" in Settings; on the phone it sits with the diff's other choices.
+                Button {
+                    wraps.toggle()
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .semibold))
+                            .opacity(wraps ? 1 : 0)
+                        Text(AppText.ocWrapLines).font(.system(size: 13))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundStyle(Color.appPrimary)
+                    .padding(.horizontal, 10)
+                    .frame(height: 34)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.changes.wrap")
+                .accessibilityLabel(AppText.ocWrapLines)
+                .accessibilityValue(wraps ? "on" : "off")
             }
             .frame(width: 220)
             .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
@@ -284,17 +289,15 @@ struct OCChangesView: View {
     private func commentArea(for file: ReviewFileChange) -> some View {
         let path = commentPath(file)
         let saved = comments.comments(sessionID: session.id, file: path)
+        let editing = selection?.file == file.path
         VStack(alignment: .leading, spacing: 8) {
             ForEach(saved) { comment in
                 HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "text.bubble")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Color.appAccent)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(AppText.ocLineCommentLabel(start: comment.startLine, end: comment.endLine))
-                            .font(.system(size: 11)).foregroundStyle(Color.appSecondary)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(comment.text)
-                            .font(.system(size: 13)).foregroundStyle(Color.appPrimary)
+                            .font(.system(size: 14)).foregroundStyle(Color.appPrimary)
+                        Text(AppText.ocLineCommentSaved(start: comment.startLine, end: comment.endLine))
+                            .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
                     }
                     Spacer(minLength: 0)
                     Button { comments.remove(comment.id) } label: {
@@ -309,61 +312,63 @@ struct OCChangesView: View {
                     .accessibilityLabel(AppText.ocLineCommentRemove)
                 }
                 .padding(10)
-                .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+                .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("oc.changes.comment")
             }
-            if let current = selection, current.file == file.path {
-                if writingComment {
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextField(AppText.ocLineCommentPlaceholder, text: $draft, axis: .vertical)
-                            .font(.system(size: 13))
-                            .lineLimit(1...5)
-                            .padding(10)
-                            .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                            .accessibilityIdentifier("oc.changes.comment.field")
-                        HStack(spacing: 8) {
-                            Spacer(minLength: 0)
-                            Button(AppText.ocLineCommentCancel) { writingComment = false; draft = "" }
-                                .buttonStyle(.bordered)
-                                .accessibilityIdentifier("oc.changes.comment.cancel")
-                            Button(AppText.ocLineCommentSubmit) {
-                                if comments.add(sessionID: session.id, file: path, selection: current, text: draft) != nil {
-                                    draft = ""
-                                    writingComment = false
-                                    selection = nil
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Color.appPrimary)
-                            .foregroundStyle(Color.appBackground)
-                            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            .accessibilityIdentifier("oc.changes.comment.submit")
-                        }
-                    }
-                } else {
-                    HStack {
-                        Text(AppText.ocLineCommentLabel(start: current.startLine, end: current.endLine))
-                            .font(.system(size: 13)).foregroundStyle(Color.appSecondary)
-                        Spacer(minLength: 0)
-                        Button { writingComment = true } label: {
-                            HStack(spacing: 5) {
-                                Image(systemName: "text.bubble").font(.system(size: 12))
-                                Text(AppText.ocLineCommentAdd).font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundStyle(Color.appPrimary)
-                            .padding(.horizontal, 10)
-                            .frame(height: 28)
-                            .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                            .contentShape(Rectangle())
+            // The web opens the editor as soon as lines are selected.
+            if editing, let current = selection {
+                VStack(alignment: .leading, spacing: 8) {
+                    TextField(AppText.ocLineCommentPlaceholder, text: $draft, axis: .vertical)
+                        .font(.system(size: 14))
+                        .lineLimit(2...6)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appAccent, lineWidth: 1))
+                        .accessibilityIdentifier("oc.changes.comment.field")
+                    Text(AppText.ocLineCommentEditing(start: current.startLine, end: current.endLine))
+                        .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
+                    HStack(spacing: 8) {
+                        Button { selection = nil; draft = "" } label: {
+                            Text(AppText.ocLineCommentCancel)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(Color.appPrimary)
+                                .padding(.horizontal, 12)
+                                .frame(height: 30)
+                                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityIdentifier("oc.changes.comment.add")
+                        .accessibilityIdentifier("oc.changes.comment.cancel")
+                        let canSubmit = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        Button {
+                            if comments.add(sessionID: session.id, file: path, selection: current, text: draft) != nil {
+                                draft = ""
+                                selection = nil
+                            }
+                        } label: {
+                            Text(AppText.ocLineCommentSubmit)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundStyle(canSubmit ? Color.appBackground : Color.appSecondary)
+                                .padding(.horizontal, 12)
+                                .frame(height: 30)
+                                .background(canSubmit ? Color.appPrimary : Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!canSubmit)
+                        .accessibilityIdentifier("oc.changes.comment.submit")
                     }
                 }
+                .padding(12)
+                .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
             }
         }
-        .padding(.horizontal, saved.isEmpty && selection?.file != file.path ? 0 : 16)
-        .padding(.vertical, saved.isEmpty && selection?.file != file.path ? 0 : 10)
+        .padding(.horizontal, saved.isEmpty && !editing ? 0 : 16)
+        .padding(.vertical, saved.isEmpty && !editing ? 0 : 10)
     }
 
     private func statusColor(_ status: String) -> Color {

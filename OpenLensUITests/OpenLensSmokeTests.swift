@@ -416,22 +416,24 @@ final class OpenLensSmokeTests: XCTestCase {
                 XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
                     .waitForExistence(timeout: 8), "Expand all did not show a diff")
                 snapshot("03-chat-changes-expanded")
-                // Wrap lines off (sideways scroll) and back on.
+                // Wrap lines off (sideways scroll) and back on: the toggle sits in the mode panel.
+                let modeButton = app.descendants(matching: .any).matching(identifier: "oc.changes.mode").firstMatch
+                modeButton.tap()
                 let wrap = app.buttons["oc.changes.wrap"]
-                XCTAssertTrue(wrap.exists, "Changes lacks the wrap toggle")
+                XCTAssertTrue(wrap.waitForExistence(timeout: 4), "Mode panel lacks the Wrap lines toggle")
                 wrap.tap()
+                modeButton.tap()
                 sleep(1)
                 snapshot("03-chat-changes-nowrap")
+                modeButton.tap()
                 wrap.tap()
+                modeButton.tap()
                 sleep(1)
                 // A line comment: select a diff line, write it, see it in the composer, remove it (never sent).
                 let line = app.descendants(matching: .any).matching(identifier: "oc.diff.line").firstMatch
                 if line.waitForExistence(timeout: 5) {
                     line.tap()
-                    let add = app.buttons["oc.changes.comment.add"]
-                    XCTAssertTrue(add.waitForExistence(timeout: 4), "Selecting a diff line offers no Add comment")
-                    snapshot("03-chat-changes-line-selected")
-                    add.tap()
+                    // Like the web, the comment editor opens as soon as a line is selected.
                     let field = app.textFields["oc.changes.comment.field"].exists
                         ? app.textFields["oc.changes.comment.field"] : app.textViews["oc.changes.comment.field"]
                     XCTAssertTrue(field.waitForExistence(timeout: 4), "Comment field missing")
