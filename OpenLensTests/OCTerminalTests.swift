@@ -382,6 +382,61 @@ struct OCTerminalSyncTests {
         #expect(OCTerminalStore.endpointChanged(client, baseURL: try #require(URL(string: "http://other:4097")), authHeader: "Basic a"))
     }
 
+    @Test func notificationIsPostedForTerminalEvents() throws {
+        nonisolated final class Box: @unchecked Sendable { var events: [OCTerminalEvent] = [] }
+        let box = Box()
+        let token = NotificationCenter.default.addObserver(forName: OCTerminalEvent.notification, object: nil, queue: nil) { note in
+            if let event = note.userInfo?["event"] as? OCTerminalEvent, event.sessionID == "ses_note" { box.events.append(event) }
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        var adapter = V2EventAdapter()
+        _ = try adapter.event(["type": "persistent-pty.added", "data": [
+            "sessionID": "ses_note", "terminal": ["id": "pty_9", "title": "Terminal 1"],
+        ]], directory: "/home/docker")
+        #expect(box.events.map(\.kind) == [.added])
+        #expect(box.events.first?.ptyID == "pty_9")
+    }
+
+    @Test func otherEventsWithoutLocationStillThrow() {
+        var adapter = V2EventAdapter()
+        #expect(throws: (any Error).self) {
+            _ = try adapter.event(["type": "session.status", "data": ["sessionID": "ses_1"]], directory: "/home/docker")
+        }
+    }
+
+    /// The web re-lists terminals on every `server.connected` (first connection and reconnects).
+    @Test func streamConnectAsksTheTerminalListsToResync() throws {
+        nonisolated final class Box: @unchecked Sendable { var count = 0 }
+        let box = Box()
+        let token = NotificationCenter.default.addObserver(forName: OCTerminalEvent.resyncNotification, object: nil, queue: nil) { _ in
+            box.count += 1
+        }
+        defer { NotificationCenter.default.removeObserver(token) }
+        var adapter = V2EventAdapter()
+        #expect(try adapter.event(["type": "server.connected", "data": [String: Any]()], directory: "/home/docker") != nil)
+        _ = try adapter.event(["type": "server.heartbeat", "data": [String: Any]()], directory: "/home/docker")
+        #expect(box.count >= 1)
+    }
+
+    @Test func handlesMoveOneEdgeAndSwapPastTheOther() {
+        let selection = OCTerminalSelection(
+            anchor: OCTerminalPoint(line: 5, column: 4), head: OCTerminalPoint(line: 3, column: 2)
+        )
+        let extended = selection.moving(.end, to: OCTerminalPoint(line: 7, column: 1))
+        #expect(extended.start == OCTerminalPoint(line: 3, column: 2))
+        #expect(extended.end == OCTerminalPoint(line: 7, column: 1))
+        let swapped = selection.moving(.start, to: OCTerminalPoint(line: 9, column: 0))
+        #expect(swapped.start == OCTerminalPoint(line: 5, column: 4))
+        #expect(swapped.end == OCTerminalPoint(line: 9, column: 0))
+    }
+
+    /// The web's 20 000 limit is a JavaScript length: UTF-16 units.
+    @Test func quoteLimitCountsUTF16() {
+        #expect(OCTerminalSelection.fitsQuote(String(repeating: "a", count: 20_000)))
+        #expect(!OCTerminalSelection.fitsQuote(String(repeating: "😀", count: 10_001)))
+        #expect(String(repeating: "😀", count: 10_001).count <= OCTerminalSelection.quoteLimit)
+    }
+
     @Test @MainActor func listFromElsewhereDropsAClosedTerminalAndKeepsTheRest() throws {
         let store = OCTerminalStore(sessionID: "ses_1", directory: nil)
         let one = OCTerminalInfo(id: "pty_1", title: "Terminal 1", cwd: nil, status: nil, sessionID: "ses_1", size: nil, output: nil)
@@ -410,5 +465,109 @@ struct OCTerminalSyncTests {
         #expect(term.cols == landscape.cols)
         #expect(term.lines(showCursor: false).map(\.text).contains("60"))
         #expect(term.lines(showCursor: false).count <= total)
+    }
+}
+
+/// Answers the terminal REST calls in memory: the list per session, 404 for snapshots (counted).
+nonisolated final class OCTerminalStubProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var lists: [String: [[String: Any]]] = [:]
+    nonisolated(unsafe) private static var snapshots: [String: Int] = [:]
+
+    static func setList(_ sessionID: String, ids: [String]) {
+        lock.withLock { lists[sessionID] = ids.map { ["id": $0, "title": "Terminal"] } }
+    }
+
+    static func snapshotCount(_ ptyID: String) -> Int {
+        lock.withLock { snapshots[ptyID] ?? 0 }
+    }
+
+    static func client() -> OCTerminalClient {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OCTerminalStubProtocol.self]
+        return OCTerminalClient(
+            baseURL: URL(string: "http://stub.invalid")!, authHeader: nil, session: URLSession(configuration: configuration)
+        )
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let parts = request.url?.path.split(separator: "/").map(String.init) ?? []
+        var status = 404
+        var body = Data("{}".utf8)
+        if parts.count >= 5, parts[2] == "session", parts[4] == "terminal" {
+            let items = Self.lock.withLock { Self.lists[parts[3]] ?? [] }
+            status = 200
+            body = (try? JSONSerialization.data(withJSONObject: ["data": items])) ?? body
+        } else if parts.count >= 5, parts[2] == "persistent-pty", parts[4] == "snapshot" {
+            Self.lock.withLock { Self.snapshots[parts[3], default: 0] += 1 }
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+@MainActor
+struct OCTerminalAttachTests {
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<60 where !condition() {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+    }
+
+    /// Changes made elsewhere never attach (no takeover of someone else's terminal); the next
+    /// visit does.
+    @Test func listChangesFromElsewhereNeverAttach() async {
+        OCTerminalStubProtocol.setList("ses_f1", ids: ["pty_f1a"])
+        let store = OCTerminalStore(sessionID: "ses_f1", directory: nil, client: OCTerminalStubProtocol.client())
+        await store.reload()
+        #expect(store.phase == .ready)
+        #expect(store.connection?.ptyID == "pty_f1a")
+
+        // The shown terminal closed on the web: its neighbour is chosen, not attached.
+        let b = OCTerminalInfo(id: "pty_f1b", title: "Terminal 2", cwd: nil, status: nil, sessionID: "ses_f1", size: nil, output: nil)
+        store.apply([b])
+        #expect(store.connection == nil)
+        #expect(store.activeID == "pty_f1b")
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(OCTerminalStubProtocol.snapshotCount("pty_f1b") == 0)
+
+        // Closed everywhere, then one opened on the web: listed, not attached.
+        store.apply([])
+        #expect(store.activeID == nil)
+        let c = OCTerminalInfo(id: "pty_f1c", title: "Terminal 1", cwd: nil, status: nil, sessionID: "ses_f1", size: nil, output: nil)
+        store.apply([c])
+        #expect(store.terminals.map(\.id) == ["pty_f1c"])
+        #expect(store.activeID == nil)
+        #expect(store.connection == nil)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(OCTerminalStubProtocol.snapshotCount("pty_f1c") == 0)
+    }
+
+    /// Background detaches; the foreground starts one new attachment (one more snapshot).
+    @Test func foregroundReattachesOnce() async {
+        OCTerminalStubProtocol.setList("ses_fg", ids: ["pty_fg"])
+        let store = OCTerminalStore(sessionID: "ses_fg", directory: nil, client: OCTerminalStubProtocol.client())
+        await store.reload()
+        await waitUntil { OCTerminalStubProtocol.snapshotCount("pty_fg") >= 1 }
+        try? await Task.sleep(for: .milliseconds(300))
+        let before = OCTerminalStubProtocol.snapshotCount("pty_fg")
+        #expect(before == 1)
+        store.background()
+        await store.foreground(apiClient: nil)
+        await waitUntil { OCTerminalStubProtocol.snapshotCount("pty_fg") > before }
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(OCTerminalStubProtocol.snapshotCount("pty_fg") == before + 1)
+        #expect(store.connection?.ptyID == "pty_fg")
+        // Without a background in between, a foreground does nothing.
+        await store.foreground(apiClient: nil)
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(OCTerminalStubProtocol.snapshotCount("pty_fg") == before + 1)
     }
 }
