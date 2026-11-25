@@ -375,7 +375,7 @@ struct OCChangesS2Tests {
         #expect(OCDiffCommentStore.commentsApply(typed: "fix it", hasSlashChip: false))
         #expect(OCDiffCommentStore.commentsApply(typed: "", hasSlashChip: false))
         #expect(!OCDiffCommentStore.commentsApply(typed: "/undo", hasSlashChip: false))
-        #expect(!OCDiffCommentStore.commentsApply(typed: "  /review x", hasSlashChip: false))
+        #expect(!OCDiffCommentStore.commentsApply(typed: "  /review x", hasSlashChip: false, knownTokens: ["review"]))
         #expect(!OCDiffCommentStore.commentsApply(typed: "", hasSlashChip: true))
         // Only a recognised command leaves the comments out; a path stays text.
         let known = ["review", "/build"]
