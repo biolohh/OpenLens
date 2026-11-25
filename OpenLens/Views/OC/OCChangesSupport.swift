@@ -26,7 +26,6 @@ extension AppText {
     static let ocShowFullDiff = "Show full diff"
     static let ocNoDiff = "No line-level diff available."
     static let ocToolDetails = "Details"
-    static let ocLargeDiff = "Large diff, tap to load"
     static let ocFolderMissing = "No folder for this session"
     static let ocFolderLoadFailed = "Couldn't load"
     static func ocShowMoreLines(_ count: Int) -> String { "Show \(count) more lines" }
@@ -78,8 +77,6 @@ nonisolated struct OCToolFileChange: Identifiable, Hashable, Sendable {
 enum OCFileSupport {
     /// Longest diff / file line that is laid out; longer ones end in an ellipsis.
     nonisolated static let maximumLineCharacters = 500
-    /// Changed lines above which a diff waits for a tap.
-    nonisolated static let largeDiffLines = 2000
 
     /// "_scratch/PROGRESS.md" -> ("_scratch/", "PROGRESS.md"); the directory keeps its trailing slash.
     nonisolated static func split(path: String) -> (directory: String, name: String) {
@@ -263,10 +260,11 @@ struct OCDiffCounts: View {
     }
 }
 
-/// The web's unified diff: line number column, wrapped monospace lines, added lines tinted green
-/// with a 2 pt bar on the left, removed ones red. Plain `VStack` (no nested lazy or horizontal
-/// scrolling), so it is safe inside a transcript row. Every line is cut at
-/// `OCFileSupport.maximumLineCharacters`; only `maximumLines` rows are laid out.
+/// The web's unified diff: line number column, monospace lines (wrapped, or scrolling sideways
+/// when `wraps` is off), syntax coloured, added lines tinted green with a 2 pt bar on the left,
+/// removed ones red. Plain `VStack` (no nested lazy scrolling), so it is safe inside a transcript
+/// row. Every line is cut at `OCFileSupport.maximumLineCharacters`; only `maximumLines` rows are
+/// laid out. Highlighting is built off the main actor and cached per file content.
 struct OCDiffBlock: View {
     let file: ReviewFileChange
     var maximumLines = Int.max
@@ -276,16 +274,24 @@ struct OCDiffBlock: View {
     var expandsInPlace = false
     /// Rows are built lazily (the sheet with a whole diff); inside the transcript they are not.
     var isLazy = false
+    /// Long lines wrap (the web's default); off scrolls the block sideways.
+    var wraps = true
+    /// The Changes tab lets rows be selected for a comment; nil = rows are not tappable.
+    var selection: Binding<OCDiffSelection?>?
+    /// File line numbers that carry a comment (marked in the gutter).
+    var commentedLines: [ClosedRange<Int>] = []
     /// Reports how many diff lines exist (nil until the hunks are built).
     var onLineCount: (Int) -> Void = { _ in }
 
-    @State private var lines: [UnifiedDiffLine]?
+    @State private var render: OCDiffRender?
+    @State private var attributed: [AttributedString] = []
     @State private var limit = 0
+    @State private var availableWidth: CGFloat = 0
 
     var body: some View {
         Group {
-            if let lines {
-                content(lines)
+            if let render {
+                content(render)
             } else {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: 48)
@@ -294,15 +300,18 @@ struct OCDiffBlock: View {
         .task(id: file) {
             let file = file
             let built = await Task.detached(priority: .userInitiated) {
-                UnifiedDiffBuilder.makeHunks(file: file).flatMap(\.lines)
+                OCDiffRender.build(file: file)
             }.value
-            lines = built
-            onLineCount(built.count)
+            guard !Task.isCancelled else { return }
+            attributed = built.segments.map(OCSyntaxTheme.attributed)
+            render = built
+            onLineCount(built.lines.count)
         }
     }
 
     @ViewBuilder
-    private func content(_ all: [UnifiedDiffLine]) -> some View {
+    private func content(_ render: OCDiffRender) -> some View {
+        let all = render.lines
         let shown = min(all.count, max(limit, maximumLines))
         if all.isEmpty {
             Text(AppText.ocNoDiff)
@@ -312,10 +321,14 @@ struct OCDiffBlock: View {
                 .padding(12)
         } else {
             Group {
-                if isLazy {
-                    LazyVStack(alignment: .leading, spacing: 0) { rows(all, shown: shown) }
+                if wraps {
+                    stack(render, all: all, shown: shown)
                 } else {
-                    VStack(alignment: .leading, spacing: 0) { rows(all, shown: shown) }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        stack(render, all: all, shown: shown)
+                            .frame(minWidth: availableWidth, alignment: .leading)
+                    }
+                    .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { availableWidth = $0 }
                 }
             }
             .overlay(alignment: .topLeading) {
@@ -325,8 +338,17 @@ struct OCDiffBlock: View {
     }
 
     @ViewBuilder
-    private func rows(_ all: [UnifiedDiffLine], shown: Int) -> some View {
-        ForEach(all.prefix(shown)) { line in row(line) }
+    private func stack(_ render: OCDiffRender, all: [UnifiedDiffLine], shown: Int) -> some View {
+        if isLazy {
+            LazyVStack(alignment: .leading, spacing: 0) { rows(render, all: all, shown: shown) }
+        } else {
+            VStack(alignment: .leading, spacing: 0) { rows(render, all: all, shown: shown) }
+        }
+    }
+
+    @ViewBuilder
+    private func rows(_ render: OCDiffRender, all: [UnifiedDiffLine], shown: Int) -> some View {
+        ForEach(0..<shown, id: \.self) { index in row(all[index], index: index, render: render) }
         if expandsInPlace, all.count > shown {
             Button {
                 limit = shown + 400
@@ -342,23 +364,53 @@ struct OCDiffBlock: View {
         }
     }
 
-    private func row(_ line: UnifiedDiffLine) -> some View {
-        HStack(alignment: .top, spacing: 0) {
+    private func isSelected(_ index: Int) -> Bool {
+        guard let current = selection?.wrappedValue, current.file == file.path else { return false }
+        return current.rows.contains(index)
+    }
+
+    private func isCommented(_ line: UnifiedDiffLine) -> Bool {
+        guard let number = line.newLineNumber ?? line.oldLineNumber else { return false }
+        return commentedLines.contains { $0.contains(number) }
+    }
+
+    @ViewBuilder
+    private func row(_ line: UnifiedDiffLine, index: Int, render: OCDiffRender) -> some View {
+        let content = HStack(alignment: .top, spacing: 0) {
             Rectangle().fill(bar(line.kind)).frame(width: 2)
             Text(showsLineNumbers ? (line.newLineNumber ?? line.oldLineNumber).map(String.init) ?? "" : "")
                 .font(.openLensMono(size: 12))
-                .foregroundStyle(Color.appSecondary)
+                .fontWeight(isCommented(line) ? .bold : .regular)
+                .foregroundStyle(isCommented(line) ? Color.appAccent : Color.appSecondary)
                 .frame(width: showsLineNumbers ? 38 : 4, alignment: .trailing)
-            Text(line.text.isEmpty ? " " : OCFileSupport.truncated(line.text))
+            Text(index < attributed.count ? attributed[index] : AttributedString(line.text))
                 .font(.openLensMono(size: 12))
                 .foregroundStyle(Color.appPrimary)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(wraps ? nil : 1)
+                .fixedSize(horizontal: !wraps, vertical: true)
+                .frame(maxWidth: wraps ? .infinity : nil, alignment: .leading)
                 .padding(.leading, 10)
                 .padding(.trailing, 6)
                 .padding(.vertical, 2)
+            if !wraps { Spacer(minLength: 0) }
         }
+        .frame(maxWidth: wraps ? nil : .infinity, alignment: .leading)
         .background(tint(line.kind))
+        .overlay { Rectangle().fill(Color.appAccent.opacity(isSelected(index) ? 0.18 : 0)) }
+        if let selection {
+            content
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    selection.wrappedValue = OCDiffSelection.toggled(
+                        selection.wrappedValue, file: file.path, row: index, lines: render.info
+                    )
+                }
+                .accessibilityIdentifier("oc.diff.line")
+                .accessibilityLabel("\(index + 1)")
+                .accessibilityAddTraits(isSelected(index) ? [.isSelected, .isButton] : [.isButton])
+        } else {
+            content
+        }
     }
 
     private func bar(_ kind: UnifiedDiffLine.Kind) -> Color {
@@ -378,25 +430,53 @@ struct OCDiffBlock: View {
     }
 }
 
-/// A diff that waits for a tap above `OCFileSupport.largeDiffLines` changed lines.
+/// A diff that waits for "Render anyway" above `OCFileSupport.maximumDiffChangedLines` changed
+/// lines (the web's large-diff card), and shows "Binary file" when there is nothing to diff.
 struct OCGuardedDiff: View {
     let file: ReviewFileChange
     var showsLineNumbers = true
+    var selection: Binding<OCDiffSelection?>?
+    var commentedLines: [ClosedRange<Int>] = []
+    @AppStorage(OCDiffSettings.wrapKey) private var wraps = true
     @State private var loads = false
 
     var body: some View {
-        if file.additions + file.deletions > OCFileSupport.largeDiffLines, !loads {
-            Button { loads = true } label: {
-                Text(AppText.ocLargeDiff)
-                    .font(.system(size: 13, weight: .medium))
+        if OCFileSupport.isBinary(file) {
+            Text(AppText.ocBinaryFile)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.appSecondary)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .accessibilityIdentifier("oc.diff.binary")
+        } else if OCFileSupport.isTooLarge(file), !loads {
+            VStack(spacing: 6) {
+                Text(AppText.ocLargeDiffTitle)
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Color.appPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .contentShape(Rectangle())
+                Text(AppText.ocLargeDiffMeta(
+                    limit: OCFileSupport.maximumDiffChangedLines, current: file.additions + file.deletions
+                ))
+                    .font(.system(size: 12))
+                    .foregroundStyle(Color.appSecondary)
+                    .multilineTextAlignment(.center)
+                Button { loads = true } label: {
+                    Text(AppText.ocRenderAnyway)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.appPrimary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 28)
+                        .background(Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.diff.large")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("oc.diff.large")
+            .padding(16)
+            .frame(maxWidth: .infinity)
         } else {
-            OCDiffBlock(file: file, maximumLines: 400, showsLineNumbers: showsLineNumbers, expandsInPlace: true)
+            OCDiffBlock(
+                file: file, maximumLines: 400, showsLineNumbers: showsLineNumbers, expandsInPlace: true,
+                wraps: wraps, selection: selection, commentedLines: commentedLines
+            )
         }
     }
 }
@@ -462,6 +542,7 @@ struct OCFileCard: View {
     private var open: Bool { OCFileCardStore.shared.open.contains(stateID) }
     @State private var showsAll = false
     @State private var lineCount: Int?
+    @AppStorage(OCDiffSettings.wrapKey) private var wraps = true
 
     /// Rows shown inline; the rest opens in a sheet. The inline diff is clipped, not scrolled:
     /// a scroll view that grows inside the lazy transcript is what the repin loop fed on.
@@ -517,7 +598,7 @@ struct OCFileCard: View {
         }
         .sheet(isPresented: $showsAll) {
             ScrollView {
-                OCDiffBlock(file: change.file, showsLineNumbers: change.hasRealLineNumbers, isLazy: true)
+                OCDiffBlock(file: change.file, showsLineNumbers: change.hasRealLineNumbers, isLazy: true, wraps: wraps)
             }
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)

@@ -315,7 +315,7 @@ private struct OCFileTree: View {
 private struct OCFileTextView: View {
     private enum LoadState {
         case loading
-        case text([String])
+        case text([AttributedString])
         case failed(String)
     }
 
@@ -348,7 +348,7 @@ private struct OCFileTextView: View {
                                     .font(.openLensMono(size: 12))
                                     .foregroundStyle(Color.appSecondary)
                                     .frame(width: 44, alignment: .trailing)
-                                Text(lines[index].isEmpty ? " " : lines[index])
+                                Text(lines[index])
                                     .font(.openLensMono(size: 12))
                                     .foregroundStyle(Color.appPrimary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -378,11 +378,16 @@ private struct OCFileTextView: View {
             let text = try await workspaceService.readRepositoryFile(at: path, in: directory)
             guard !Task.isCancelled else { return }
             let maximum = Self.maximumLines
-            let lines = await Task.detached(priority: .userInitiated) {
-                OCFileSupport.cappedLines(text, maximumLines: maximum)
+            let language = OCSyntaxLanguage.detect(path: path)
+            // Split and tokenised in one pass off the main actor, so block comments and multi-line
+            // strings carry across lines.
+            let segments = await Task.detached(priority: .userInitiated) {
+                OCSyntaxHighlighter.highlight(
+                    lines: OCFileSupport.cappedLines(text, maximumLines: maximum), language: language
+                )
             }.value
             guard !Task.isCancelled else { return }
-            state = .text(lines)
+            state = .text(segments.map(OCSyntaxTheme.attributed))
         } catch {
             guard !Task.isCancelled else { return }
             state = .failed(error.localizedDescription)

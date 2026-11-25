@@ -83,3 +83,12 @@ extension OCVCSInfo {
         return branch != defaultBranch
     }
 }
+
+/// What the no-git state shows when "Create Git repository" fails (the web's failure toast text).
+nonisolated enum OCGitInitMessage {
+    static func text(for error: Error) -> String {
+        if let urlError = error as? URLError, urlError.code == .timedOut { return AppText.ocGitTimeout }
+        if case OpenCodeError.apiError(_, let payload) = error, let message = payload.message?.nilIfBlank { return message }
+        return error.localizedDescription
+    }
+}
