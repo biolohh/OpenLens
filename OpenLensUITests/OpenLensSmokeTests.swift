@@ -661,9 +661,10 @@ final class OpenLensSmokeTests: XCTestCase {
         func menuItem(_ title: String) -> XCUIElement {
             app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
         }
-        let selected = app.descendants(matching: .any).matching(identifier: "oc.terminal.selection").firstMatch
+        // The end handle carries the selected text as its value.
+        let selected = app.descendants(matching: .any).matching(identifier: "oc.terminal.handle.end").firstMatch
         func selectedText() -> String {
-            guard selected.waitForExistence(timeout: 2) else { return "<no selection marker>" }
+            guard selected.waitForExistence(timeout: 2) else { return "<no selection>" }
             return (selected.value as? String) ?? ""
         }
         guard output.waitForExistence(timeout: 5) else {

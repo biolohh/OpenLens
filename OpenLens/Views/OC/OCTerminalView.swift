@@ -335,14 +335,6 @@ private struct OCTerminalSurface: View {
                         .transition(.opacity)
                 }
             }
-            .overlay(alignment: .bottomTrailing) {
-                // The selected text for UI tests (not read by VoiceOver).
-                Color.clear.frame(width: 1, height: 1)
-                    .accessibilityElement()
-                    .accessibilityLabel(AppText.ocTerminalSelectionLabel)
-                    .accessibilityIdentifier("oc.terminal.selection")
-                    .accessibilityValue(selection == nil ? "" : String(selectedText.prefix(200)))
-            }
             .coordinateSpace(.named(Self.viewport))
             .onAppear { report(proxy.size) }
             .onChange(of: proxy.size) { _, size in report(size) }
@@ -408,6 +400,8 @@ private struct OCTerminalSurface: View {
                         .accessibilityElement()
                         .accessibilityLabel(edge == .start ? AppText.ocTerminalSelectionStart : AppText.ocTerminalSelectionEnd)
                         .accessibilityIdentifier(edge == .start ? "oc.terminal.handle.start" : "oc.terminal.handle.end")
+                        // The selected text (UI tests read it from the end handle).
+                        .accessibilityValue(edge == .end ? String(selectedText.prefix(200)) : "")
                 }
             }
         }

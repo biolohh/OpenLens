@@ -593,7 +593,6 @@ enum AppText {
     nonisolated static let ocTerminalQuoteTooLong = "Selection too long"
     nonisolated static let ocTerminalQuoteLabel = "Terminal"
     nonisolated static let ocTerminalQuoteRemove = "Remove quote"
-    nonisolated static let ocTerminalSelectionLabel = "Selected text"
     nonisolated static let ocTerminalSelectionStart = "Selection start"
     nonisolated static let ocTerminalSelectionEnd = "Selection end"
     nonisolated static let ocTerminalQuoteDone = "Done"
