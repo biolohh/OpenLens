@@ -92,6 +92,12 @@ enum OCFileSupport {
         return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
     }
 
+    /// Whether a session path (from `sessionPath`) lies inside the session folder; an absolute one
+    /// is outside, and the Files tab cannot open it.
+    nonisolated static func isInsideSession(_ sessionPath: String) -> Bool {
+        !sessionPath.hasPrefix("/")
+    }
+
     /// A diff path (relative to `root`, or absolute) as the session folder sees it: relative to the
     /// session folder when inside it, else absolute. Without a root the session folder is the base.
     nonisolated static func sessionPath(_ path: String, root: String?, sessionDirectory: String?) -> String {

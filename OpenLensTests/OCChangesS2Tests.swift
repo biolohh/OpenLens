@@ -475,6 +475,9 @@ struct OCChangesS2Tests {
         #expect(OCFileSupport.sessionPath("/repo/app/c.swift", root: "/repo", sessionDirectory: "/repo/app") == "c.swift")
         #expect(OCFileSupport.sessionPath("x/y.txt", root: "/repo", sessionDirectory: "/repo") == "x/y.txt")
         #expect(OCFileSupport.sessionPath("x/y.txt", root: nil, sessionDirectory: "/repo") == "x/y.txt")
+        // Outside the session folder the Files tab cannot open it, so the button is not offered.
+        #expect(OCFileSupport.isInsideSession("a.swift"))
+        #expect(!OCFileSupport.isInsideSession("/repo/lib/b.swift"))
     }
 
     @Test func selectionsAndCommentsCarryTheirSide() throws {

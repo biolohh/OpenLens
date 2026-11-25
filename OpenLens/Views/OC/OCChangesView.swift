@@ -262,7 +262,7 @@ struct OCChangesView: View {
                         .foregroundStyle(statusColor(file.status))
                     OCDiffCounts(additions: file.additions, deletions: file.deletions)
                     Spacer(minLength: 0)
-                    if file.status.uppercased() != "D" {
+                    if file.status.uppercased() != "D", OCFileSupport.isInsideSession(sessionPath(file)) {
                         Button {
                             openFile(sessionPath(file))
                         } label: {
