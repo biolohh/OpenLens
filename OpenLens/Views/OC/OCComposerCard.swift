@@ -222,6 +222,7 @@ struct OCComposerSendLabel: View {
 struct OCComposerCommentChips: View {
     let sessionID: String?
     private let store = OCDiffCommentStore.shared
+    @State private var editorHeight: CGFloat = 0
 
     var body: some View {
         let items = store.comments(sessionID: sessionID)
@@ -240,7 +241,10 @@ struct OCComposerCommentChips: View {
                 if let editing = items.first(where: { $0.id == store.editingQuoteID && $0.quote != nil }) {
                     OCQuoteCommentEditor(quote: editing, store: store)
                         .id(editing.id)
-                        .alignmentGuide(.top) { $0[.bottom] + 18 }
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { editorHeight = $0 }
+                        // Its bottom 8 pt above the composer card (the chips start 10 pt inside it).
+                        .offset(y: -(editorHeight + 18))
                 }
             }
         }
