@@ -5,6 +5,9 @@ import SwiftUI
 extension AppText {
     static let ocChangesGit = "Git changes"
     static let ocChangesTurn = "Last turn changes"
+    static let ocChangesBranch = "Branch changes"
+    static let ocChangesEmptyBranch = "No branch changes yet"
+    static let ocRequestFailed = "Request failed"
     static let ocChangesEmptyGit = "No uncommitted changes yet"
     static let ocChangesEmptyTurn = "No changes"
     static let ocChangesLoading = "Loading changes…"
@@ -31,14 +34,17 @@ extension AppText {
 
 // MARK: - Changes model
 
-/// The web's review modes that the app can serve: the git working tree and the newest turn.
+/// The web's review modes: the git working tree, the branch against the default branch, and
+/// the newest turn.
 enum OCChangesMode: String, CaseIterable, Hashable, Sendable {
     case git
+    case branch
     case turn
 
     var title: String {
         switch self {
         case .git: AppText.ocChangesGit
+        case .branch: AppText.ocChangesBranch
         case .turn: AppText.ocChangesTurn
         }
     }
@@ -46,6 +52,7 @@ enum OCChangesMode: String, CaseIterable, Hashable, Sendable {
     var emptyText: String {
         switch self {
         case .git: AppText.ocChangesEmptyGit
+        case .branch: AppText.ocChangesEmptyBranch
         case .turn: AppText.ocChangesEmptyTurn
         }
     }
@@ -55,6 +62,8 @@ struct OCChangesAvailability: Equatable, Sendable {
     /// The session's project is a git repository; without it the web shows "No tracked changes".
     let isGit: Bool
     let modes: [OCChangesMode]
+    /// The folder the repository is read at (the project's root); `nil` = the client's folder.
+    var directory: String?
 }
 
 /// A file a tool call changed, with whether its diff lines carry the file's real line numbers

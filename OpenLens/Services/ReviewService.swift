@@ -3,6 +3,8 @@ import Foundation
 final class ReviewService {
 
     private let connection: ConnectionManager
+    /// Carries the Changes tab's own VCS requests (`OCVCSRemote`); tests replace it.
+    var vcsTransport: any OpenCodeTransport = DirectOpenCodeTransport()
 
     init(connection: ConnectionManager) {
         self.connection = connection
@@ -179,29 +181,73 @@ final class ReviewService {
             .filter { OCFileSupport.isInside(directory, root: $0.worktree) }
             .max { ($0.worktree?.count ?? 0) < ($1.worktree?.count ?? 0) }
         guard project?.vcs?.lowercased() == "git" else {
-            return OCChangesAvailability(isGit: false, modes: [])
+            return OCChangesAvailability(isGit: false, modes: [], directory: directory)
         }
-        // The working tree is read through the client's active folder, so it is only
-        // the session's own tree when the two agree.
-        let context = await client.currentContextDirectory()
-        let sameFolder = directory == nil || OCFileSupport.sameFolder(context, directory)
-        return OCChangesAvailability(isGit: true, modes: sameFolder ? [.git, .turn] : [.turn])
+        // Like the web, the repository is read at the project's root.
+        let root = project?.worktree?.nilIfBlank ?? directory
+        var modes: [OCChangesMode] = [.git]
+        if let root, let info = try? await vcsInfo(directory: root), info.offersBranchChanges {
+            modes.append(.branch)
+        }
+        modes.append(.turn)
+        return OCChangesAvailability(isGit: true, modes: modes, directory: root)
     }
 
-    /// The files of one mode: `git` is the working tree, `turn` the newest turn of the session.
-    func loadChanges(sessionID: String, mode: OCChangesMode) async throws -> [ReviewFileChange] {
+    /// The files of one mode: `git` is the working tree, `branch` the branch against the default
+    /// branch, `turn` the newest turn of the session.
+    func loadChanges(sessionID: String, mode: OCChangesMode, directory: String? = nil) async throws -> [ReviewFileChange] {
         if ScreenshotFixtures.isEnabled {
             return ScreenshotFixtures.reviewSnapshot(sessionID: sessionID).workingTree
         }
         guard let client = connection.client else { throw OpenCodeError.notConnected }
         let diffs: [OCFileDiff]
         switch mode {
-        case .git: diffs = try await client.getWorkingTreeDiff()
-        case .turn: diffs = try await client.getSessionDiff(sessionID: sessionID)
+        case .git:
+            if let directory {
+                diffs = try await vcsDiff(directory: directory, mode: .working)
+            } else {
+                diffs = try await client.getWorkingTreeDiff()
+            }
+        case .branch:
+            guard let directory else { throw OCVCSError.unavailable }
+            diffs = try await vcsDiff(directory: directory, mode: .branch)
+        case .turn:
+            diffs = try await client.getSessionDiff(sessionID: sessionID)
         }
         // Patch parsing and line counting of big diffs stay off the main actor.
         return await Task.detached(priority: .userInitiated) {
             diffs.map { ReviewFileChange(diff: $0) }
         }.value
+    }
+
+    /// The web's "Create a Git repository": `POST /api/vcs/init?provider=git` for exactly the
+    /// given folder (never the client's active one). Without a folder nothing is sent.
+    func initGitRepository(directory: String?) async throws {
+        guard let directory = directory?.nilIfBlank else { throw OCVCSError.unavailable }
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let endpoint = await client.connectionEndpoint()
+        let request = OCVCSRemote.initRequest(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory)
+        let (data, response) = try await vcsTransport.data(for: request)
+        try OCVCSRemote.validate(response, data: data)
+    }
+
+    func vcsInfo(directory: String) async throws -> OCVCSInfo {
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let endpoint = await client.connectionEndpoint()
+        let request = OCVCSRemote.infoRequest(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory)
+        let (data, response) = try await vcsTransport.data(for: request)
+        try OCVCSRemote.validate(response, data: data)
+        return try JSONDecoder().decode(OCV2Located<OCVCSInfo>.self, from: data).data
+    }
+
+    private func vcsDiff(directory: String, mode: OCVCSRemote.Diff) async throws -> [OCFileDiff] {
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let endpoint = await client.connectionEndpoint()
+        let request = OCVCSRemote.diffRequest(
+            baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory, mode: mode
+        )
+        let (data, response) = try await vcsTransport.data(for: request)
+        try OCVCSRemote.validate(response, data: data)
+        return try JSONDecoder().decode(OCV2Located<[OCFileDiff]>.self, from: data).data
     }
 }

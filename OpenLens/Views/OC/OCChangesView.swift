@@ -321,7 +321,7 @@ struct OCChangesView: View {
                 try? await Task.sleep(for: .milliseconds(700))
                 guard !Task.isCancelled else { return }
             }
-            let files = try await reviewService.loadChanges(sessionID: session.id, mode: mode)
+            let files = try await reviewService.loadChanges(sessionID: session.id, mode: mode, directory: availability?.directory)
             guard !Task.isCancelled else { return }
             state = .loaded(files)
         } catch is CancellationError {

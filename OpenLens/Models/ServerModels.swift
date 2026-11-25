@@ -2171,9 +2171,12 @@ nonisolated struct OCPathInfo: Codable, Sendable {
 
 nonisolated struct OCVCSInfo: Decodable, Sendable {
     let branch: String?
+    /// The repository's default branch (v2 `branch.default`); nil on v1 servers.
+    let defaultBranch: String?
 
-    init(branch: String?) {
+    init(branch: String?, defaultBranch: String? = nil) {
         self.branch = branch
+        self.defaultBranch = defaultBranch
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -2182,14 +2185,18 @@ nonisolated struct OCVCSInfo: Decodable, Sendable {
 
     private struct Branch: Decodable {
         let current: String?
+        let `default`: String?
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         if let branch = try? container.decodeIfPresent(String.self, forKey: .branch) {
             self.branch = branch
+            self.defaultBranch = nil
         } else {
-            self.branch = try container.decodeIfPresent(Branch.self, forKey: .branch)?.current
+            let object = try container.decodeIfPresent(Branch.self, forKey: .branch)
+            self.branch = object?.current
+            self.defaultBranch = object?.default
         }
     }
 }
