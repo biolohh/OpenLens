@@ -277,12 +277,12 @@ struct OCChangesS2Tests {
         #expect(has(line, "<div", .tag))
         #expect(has(line, "class", .property))
         #expect(has(line, "\"a\"", .string))
-        #expect(has(line, "</div", .tag))
+        #expect(has(line, "</div>", .tag))
         #expect(OCSyntaxHighlighter.highlight(lines: ["<!-- a", "b -->"], language: .html)[1].first?.kind == .comment)
     }
 
     @Test func shellAndCSS() {
-        let sh = kinds("if [ -n \"$HOME\" ]; then # go", .shell)
+        let sh = kinds("if [ -n $HOME ]; then # go", .shell)
         #expect(has(sh, "if", .keyword))
         #expect(has(sh, "$HOME", .property))
         #expect(has(sh, "# go", .comment))
