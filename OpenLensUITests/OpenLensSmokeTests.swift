@@ -662,7 +662,10 @@ final class OpenLensSmokeTests: XCTestCase {
             app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
         }
         let selected = app.descendants(matching: .any).matching(identifier: "oc.terminal.selection").firstMatch
-        func selectedText() -> String { (selected.value as? String) ?? "" }
+        func selectedText() -> String {
+            guard selected.waitForExistence(timeout: 2) else { return "<no selection marker>" }
+            return (selected.value as? String) ?? ""
+        }
         guard output.waitForExistence(timeout: 5) else {
             XCTFail("Terminal output line not on screen for selecting")
             return

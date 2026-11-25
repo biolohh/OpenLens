@@ -339,6 +339,7 @@ private struct OCTerminalSurface: View {
                 // The selected text for UI tests (not read by VoiceOver).
                 Color.clear.frame(width: 1, height: 1)
                     .accessibilityElement()
+                    .accessibilityLabel(AppText.ocTerminalSelectionLabel)
                     .accessibilityIdentifier("oc.terminal.selection")
                     .accessibilityValue(selection == nil ? "" : String(selectedText.prefix(200)))
             }
