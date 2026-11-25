@@ -389,12 +389,15 @@ private struct OCTerminalSurface: View {
                             y: edge == .start ? position.y + metrics.lineHeight / 2 - 5 : position.y - metrics.lineHeight / 2 + 5
                         )
                         .highPriorityGesture(
-                            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rows))
+                            // Viewport coordinates: the menu returns where the handle was let go
+                            // (the translation is the same in any space).
+                            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.viewport))
                                 .onChanged { value in moveHandle(edge, from: position, by: value.translation) }
-                                .onEnded { _ in
+                                .onEnded { value in
                                     handleDrag = nil
                                     lastSelectGesture = Date()
-                                    menuRequest = OCTerminalMenuRequest(point: lastMenuPoint)
+                                    lastMenuPoint = value.location
+                                    menuRequest = OCTerminalMenuRequest(point: value.location)
                                 }
                         )
                         .accessibilityElement()
