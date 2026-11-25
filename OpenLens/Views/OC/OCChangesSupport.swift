@@ -1,3 +1,4 @@
+import ImageIO
 import SwiftUI
 
 // MARK: - Strings of the Changes / Files tabs (the web's wording)
@@ -138,6 +139,41 @@ enum OCFileSupport {
 
     /// The first `maximumLines` lines of a file, each cut at `maximumLineCharacters`; the rest of a
     /// huge file is never split or mapped.
+    /// Image and audio previews hold the whole file in memory; above this they read "too large".
+    nonisolated static let maxPreviewBytes = 20_000_000
+
+    nonisolated static func withinPreviewLimit(_ data: Data) -> Bool {
+        data.count <= maxPreviewBytes
+    }
+
+    /// The image decoded at no more than `maxPixel` on its longer side (never the full bitmap),
+    /// with the orientation applied. Runs off the main actor.
+    nonisolated static func downsampledImage(_ data: Data, maxPixel: CGFloat) -> UIImage? {
+        let sourceOptions = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, sourceOptions) else { return nil }
+        let options = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceCreateThumbnailWithTransform: true,
+            kCGImageSourceShouldCacheImmediately: true,
+            kCGImageSourceThumbnailMaxPixelSize: max(1, maxPixel),
+        ] as CFDictionary
+        guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options) else { return nil }
+        return UIImage(cgImage: cgImage)
+    }
+
+    /// Writes preview audio to a temp file; nil when cancelled before the write or on failure.
+    nonisolated static func writeTemporaryAudio(_ data: Data, pathExtension: String) -> URL? {
+        guard !Task.isCancelled else { return nil }
+        let name = "oc-audio-\(UUID().uuidString)" + (pathExtension.isEmpty ? "" : "." + pathExtension)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do { try data.write(to: url) } catch { return nil }
+        if Task.isCancelled {
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
+        return url
+    }
+
     /// Runs blocking work off the main actor and hands the caller's cancellation on to it: a plain
     /// `Task.detached` does not inherit it, so a closed file would keep its highlighter running.
     nonisolated static func runCancellable<T: Sendable>(

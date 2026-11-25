@@ -10,6 +10,7 @@ extension AppText {
     }
     static let ocRenderAnyway = "Render anyway"
     static let ocBinaryFile = "Binary file"
+    static let ocFileTooLarge = "File too large to preview"
     static let ocWrapLines = "Wrap lines"
     static let ocCreateGit = "Create Git repository"
     static let ocCreatingGit = "Creating…"

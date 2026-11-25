@@ -363,7 +363,7 @@ private struct OCFileTextView: View {
             case .binary:
                 centeredText(AppText.ocBinaryFile).accessibilityIdentifier("oc.file.binary")
             case .image(let image):
-                ScrollView([.horizontal, .vertical]) {
+                ScrollView(.vertical) {
                     Image(uiImage: image).resizable().scaledToFit()
                         .frame(maxWidth: .infinity)
                         .padding(16)
@@ -464,15 +464,27 @@ private struct OCFileTextView: View {
             case .image, .audio:
                 let (data, _) = try await reviewService.readFileData(path: path, directory: directory)
                 guard !Task.isCancelled else { return }
+                guard OCFileSupport.withinPreviewLimit(data) else {
+                    state = .failed(AppText.ocFileTooLarge)
+                    return
+                }
                 if kind == .image {
-                    let image = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+                    let maxPixel = UIScreen.main.bounds.width * 2
+                    let image = await OCFileSupport.runCancellable {
+                        OCFileSupport.downsampledImage(data, maxPixel: maxPixel)
+                    }
                     guard !Task.isCancelled else { return }
                     state = image.map { .image($0) } ?? .binary
                 } else {
                     let ext = (path as NSString).pathExtension
-                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("oc-audio-\(UUID().uuidString).\(ext)")
-                    try data.write(to: url)
-                    state = .audio(url)
+                    let url = await OCFileSupport.runCancellable {
+                        OCFileSupport.writeTemporaryAudio(data, pathExtension: ext)
+                    }
+                    guard !Task.isCancelled else {
+                        if let url { try? FileManager.default.removeItem(at: url) }
+                        return
+                    }
+                    state = url.map { .audio($0) } ?? .failed(AppText.ocBinaryFile)
                 }
             case .text, .markdown:
                 let text = try await workspaceService.readRepositoryFile(at: path, in: directory)
@@ -513,20 +525,23 @@ private struct OCAudioPreview: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            Button { toggle() } label: {
-                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
-                    .font(.system(size: 44))
-                    .foregroundStyle(Color.appPrimary)
+            if !failed {
+                Button { toggle() } label: {
+                    Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                        .font(.system(size: 44))
+                        .foregroundStyle(Color.appPrimary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.file.audio.play")
+                .accessibilityLabel(isPlaying ? "Pause" : "Play")
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("oc.file.audio.play")
-            .accessibilityLabel(isPlaying ? "Pause" : "Play")
             Text(failed ? AppText.ocBinaryFile : url.lastPathComponent)
                 .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onDisappear {
             player?.stop()
+            deactivateSession()
             try? FileManager.default.removeItem(at: url)
         }
     }
@@ -540,14 +555,22 @@ private struct OCAudioPreview: View {
         if player.isPlaying {
             player.pause()
             isPlaying = false
+            deactivateSession()
         } else {
             try? AVAudioSession.sharedInstance().setCategory(.playback)
+            try? AVAudioSession.sharedInstance().setActive(true)
             isPlaying = player.play()
             // Back to the play icon when it ends.
             Task {
                 while player.isPlaying { try? await Task.sleep(for: .milliseconds(300)) }
                 isPlaying = false
+                deactivateSession()
             }
         }
+    }
+
+    /// Gives the audio focus back, so music playing before resumes.
+    private func deactivateSession() {
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 }

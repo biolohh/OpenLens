@@ -508,6 +508,32 @@ struct OCChangesS2Tests {
         #expect(OCFileSupport.cappedText("a\nb", maximumLines: 5000) == "a\nb")
     }
 
+    @Test func previewsAreCappedAndImagesDecodeDownsampled() throws {
+        #expect(OCFileSupport.withinPreviewLimit(Data(count: OCFileSupport.maxPreviewBytes)))
+        #expect(!OCFileSupport.withinPreviewLimit(Data(count: OCFileSupport.maxPreviewBytes + 1)))
+        let size = CGSize(width: 1600, height: 800)
+        let renderer = UIGraphicsImageRenderer(size: size, format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }())
+        let png = renderer.pngData { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        let small = try #require(OCFileSupport.downsampledImage(png, maxPixel: 400))
+        #expect(max(small.size.width * small.scale, small.size.height * small.scale) <= 400)
+        #expect(OCFileSupport.downsampledImage(Data([1, 2, 3]), maxPixel: 400) == nil)
+    }
+
+    @Test func temporaryAudioIsWrittenUnlessCancelled() async throws {
+        let url = try #require(OCFileSupport.writeTemporaryAudio(Data([1, 2]), pathExtension: "m4a"))
+        #expect(url.pathExtension == "m4a" && FileManager.default.fileExists(atPath: url.path))
+        try? FileManager.default.removeItem(at: url)
+        let cancelled = Task { () -> URL? in
+            while !Task.isCancelled { await Task.yield() }
+            return OCFileSupport.writeTemporaryAudio(Data([1]), pathExtension: "mp3")
+        }
+        cancelled.cancel()
+        #expect(await cancelled.value == nil)
+    }
+
     @Test func cancellationReachesTheDetachedWork() async {
         // The work spins until it sees its own task cancelled (at most 5 s); a plain detached task
         // would never see the caller's cancellation.
