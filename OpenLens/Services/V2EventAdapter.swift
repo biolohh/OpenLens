@@ -22,6 +22,9 @@ nonisolated struct V2EventAdapter {
               let data = envelope["data"] as? [String: Any] else {
             throw OpenCodeError.invalidPayload("Invalid native v2 event.")
         }
+        // Terminal lists may have changed while the stream was down: the Terminal tabs re-read
+        // them (the web's terminal model re-lists on every `server.connected`).
+        if type == "server.connected" { OCTerminalEvent.postResync() }
         if type == "server.connected" || type == "server.heartbeat" {
             return OCEvent(type: type, properties: AnyCodable([String: String]()))
         }
