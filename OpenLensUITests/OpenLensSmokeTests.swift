@@ -718,6 +718,16 @@ final class OpenLensSmokeTests: XCTestCase {
         let editor = app.descendants(matching: .any).matching(identifier: "oc.composer.quote.editor").firstMatch
         XCTAssertTrue(editor.waitForExistence(timeout: 3), "No comment editor after Quote")
         snapshot("03-chat-terminal-quote-chip")
+        // Return in the comment field submits it (the web's Enter), never a newline. Not sent:
+        // the comment only joins the chip, which is removed below.
+        let field = app.textFields["oc.composer.quote.commentField"]
+        if field.waitForExistence(timeout: 3) {
+            if !field.hasFocus { field.tap() }
+            app.typeText("smoke note\n")
+            sleep(1)
+            XCTAssertFalse(editor.exists, "Return did not submit the quote comment")
+            XCTAssertTrue(app.staticTexts["smoke note"].firstMatch.waitForExistence(timeout: 3), "The comment is not on the quote chip")
+        }
         let done = app.buttons["oc.composer.quote.done"]
         if done.exists { done.tap() }
         sleep(1)
