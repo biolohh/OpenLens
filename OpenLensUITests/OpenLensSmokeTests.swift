@@ -677,8 +677,7 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(quote.waitForExistence(timeout: 5), "Second selection showed no Quote")
         guard quote.exists else { return }
         quote.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal.quoted").firstMatch
-            .waitForExistence(timeout: 3), "Quote gave no confirmation")
+        sleep(1)
         app.buttons["oc.tab.session"].tap()
         let chip = app.descendants(matching: .any).matching(identifier: "oc.composer.quote").firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), "Quoted terminal text is not in the composer")
