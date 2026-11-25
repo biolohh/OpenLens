@@ -377,9 +377,9 @@ struct OCDiffBlock: View {
         }
     }
 
-    private func isSelected(_ index: Int) -> Bool {
+    private func isSelected(_ index: Int, render: OCDiffRender) -> Bool {
         guard let current = selection?.wrappedValue, current.file == file.path else { return false }
-        return current.rows.contains(index)
+        return current.covers(row: index, lines: render.info)
     }
 
     private func isCommented(_ line: UnifiedDiffLine) -> Bool {
@@ -410,7 +410,7 @@ struct OCDiffBlock: View {
         }
         .frame(maxWidth: wraps ? nil : .infinity, alignment: .leading)
         .background { Rectangle().fill(tint(line.kind)) }
-        .overlay { Rectangle().fill(Color.appAccent.opacity(isSelected(index) ? 0.18 : 0)) }
+        .overlay { Rectangle().fill(Color.appAccent.opacity(isSelected(index, render: render) ? 0.18 : 0)) }
         if let selection {
             content
                 .contentShape(Rectangle())
@@ -421,7 +421,7 @@ struct OCDiffBlock: View {
                 }
                 .accessibilityIdentifier("oc.diff.line")
                 .accessibilityLabel("\(index + 1)")
-                .accessibilityAddTraits(isSelected(index) ? [.isSelected, .isButton] : [.isButton])
+                .accessibilityAddTraits(isSelected(index, render: render) ? [.isSelected, .isButton] : [.isButton])
         } else {
             content
         }

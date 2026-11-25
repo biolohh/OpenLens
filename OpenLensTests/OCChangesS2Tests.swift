@@ -489,6 +489,9 @@ struct OCChangesS2Tests {
         // A range ending on an added row counts that side's rows only (12 and 13, not the removed 12).
         let range = try #require(OCDiffSelection.toggled(removed, file: "a", row: 2, lines: rows))
         #expect(range.side == .additions && range.startLine == 12 && range.endLine == 13)
+        // The highlight follows the same side: the removed row 0 is inside the range but not covered.
+        #expect(!range.covers(row: 0, lines: rows))
+        #expect(range.covers(row: 1, lines: rows) && range.covers(row: 2, lines: rows))
         let store = OCDiffCommentStore()
         let saved = try #require(store.add(sessionID: "s", file: "a", selection: removed, text: "x"))
         #expect(saved.side == .deletions)

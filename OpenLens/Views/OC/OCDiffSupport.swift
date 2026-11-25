@@ -97,6 +97,11 @@ nonisolated struct OCDiffSelection: Equatable, Sendable {
     /// The side of the last tapped row; the line numbers count that side only.
     var side: OCDiffSide = .additions
 
+    /// A row is highlighted only on the selected side, so the highlight matches the comment's lines.
+    nonisolated func covers(row: Int, lines: [OCDiffLineInfo]) -> Bool {
+        rows.contains(row) && lines.indices.contains(row) && lines[row].side == side
+    }
+
     /// Tap logic of the mobile diff: a first tap selects a line, a second tap on another line
     /// extends it to a range, a tap on the selected line (or a third tap) starts over.
     nonisolated static func toggled(
