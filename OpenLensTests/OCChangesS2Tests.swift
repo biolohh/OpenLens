@@ -500,6 +500,14 @@ struct OCChangesS2Tests {
         #expect(saved.side == .deletions)
     }
 
+    @Test func markdownPreviewInputIsCappedLikeTheSource() {
+        let text = (0..<8000).map { "line \($0)" }.joined(separator: "\n")
+        let capped = OCFileSupport.cappedText(text, maximumLines: 5000)
+        #expect(capped.split(separator: "\n", omittingEmptySubsequences: false).count == 5000)
+        #expect(capped.hasSuffix("line 4999"))
+        #expect(OCFileSupport.cappedText("a\nb", maximumLines: 5000) == "a\nb")
+    }
+
     @Test func cancellationReachesTheDetachedWork() async {
         // The work spins until it sees its own task cancelled (at most 5 s); a plain detached task
         // would never see the caller's cancellation.

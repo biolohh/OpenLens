@@ -487,7 +487,11 @@ private struct OCFileTextView: View {
                     ).map(OCSyntaxTheme.attributed)
                 }
                 guard !Task.isCancelled else { return }
-                state = .text(lines: lines, markdown: kind == .markdown ? text : nil)
+                let preview = kind == .markdown
+                    ? await OCFileSupport.runCancellable { OCFileSupport.cappedText(text, maximumLines: maximum) }
+                    : nil
+                guard !Task.isCancelled else { return }
+                state = .text(lines: lines, markdown: preview)
             }
         } catch {
             guard !Task.isCancelled else { return }

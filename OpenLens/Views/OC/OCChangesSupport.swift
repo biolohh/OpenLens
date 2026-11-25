@@ -147,6 +147,11 @@ enum OCFileSupport {
         return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
     }
 
+    /// The text cut to its first `maximumLines` lines (the Markdown preview's input, like the source view).
+    nonisolated static func cappedText(_ text: String, maximumLines: Int) -> String {
+        cappedLines(text, maximumLines: maximumLines).joined(separator: "\n")
+    }
+
     nonisolated static func cappedLines(_ text: String, maximumLines: Int) -> [String] {
         text.split(separator: "\n", maxSplits: maximumLines, omittingEmptySubsequences: false)
             .prefix(maximumLines)
