@@ -150,11 +150,16 @@ final class OCDiffCommentStore {
         all.removeAll { $0.sessionID == sessionID }
     }
 
-    /// The prompt as sent: the comment sentences first (one paragraph each), then what was typed.
+    /// Comments join a prompt unless it is a slash command, which must keep starting with "/".
+    nonisolated static func commentsApply(typed: String, hasSlashChip: Bool) -> Bool {
+        !hasSlashChip && !typed.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/")
+    }
+
+    /// The prompt as sent, like the web's request builder: the typed text first, then the comment
+    /// sentences, one per line.
     nonisolated static func composedPrompt(comments: [OCDiffComment], typed: String) -> String {
-        let notes = comments.map(\.note)
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (notes + (text.isEmpty ? [] : [text])).joined(separator: "\n\n")
+        return ([text] + comments.map(\.note)).filter { !$0.isEmpty }.joined(separator: "\n")
     }
 }
 

@@ -1160,6 +1160,9 @@ struct ChatView: View {
             return chatClient.isLoading ? !canQueuePrompt : !canSend
         }
 
+        // A waiting line comment alone can be sent when idle; it never turns Stop into Queue.
+        if !chatClient.isLoading, !appliedLineComments.isEmpty { return !canSend }
+
         return chatClient.isLoading ? chatClient.isStoppingResponse : true
     }
 
@@ -1200,12 +1203,12 @@ struct ChatView: View {
     /// sends, returning false when there is nothing to send. If the client
     /// leaves that text in place, the skill mentions turn back into chips.
     private func commitComposerChips() -> Bool {
-        guard selectedSlashAction != nil || !attachedSkills.isEmpty || !composerLineComments.isEmpty else { return true }
+        guard selectedSlashAction != nil || !attachedSkills.isEmpty || !appliedLineComments.isEmpty else { return true }
 
         let composedText = composerSendText
         guard !composedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
 
-        if let sessionID = chatClient.currentSession?.id, !composerLineComments.isEmpty {
+        if let sessionID = chatClient.currentSession?.id, !appliedLineComments.isEmpty {
             OCDiffCommentStore.shared.clear(sessionID: sessionID)
         }
         chatClient.inputText = composedText
@@ -1400,7 +1403,7 @@ struct ChatView: View {
     }
 
     private var canSend: Bool {
-        hasComposerText &&
+        (hasComposerText || !appliedLineComments.isEmpty) &&
             !chatClient.isLoading &&
             !chatClient.isQueueingPrompt &&
             chatClient.currentSession != nil &&
@@ -1418,25 +1421,39 @@ struct ChatView: View {
             chatClient.canCompose
     }
 
+    /// Typed text and slash / skill chips only: this decides Stop versus Queue and what Return does,
+    /// so a line comment waiting from the Changes tab never changes them.
     private var hasComposerText: Bool {
-        !composerSendText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !composerTypedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private var composerSendText: String {
+    private var composerTypedText: String {
         let text = selectedSlashAction.map(composedSlashActionText(for:)) ?? chatClient.inputText
-        let base = attachedSkills.isEmpty ? text : SkillMention.composing(
+        return attachedSkills.isEmpty ? text : SkillMention.composing(
             text.trimmingCharacters(in: .whitespacesAndNewlines),
             mentioning: attachedSkills.map(\.id)
         )
-        // Line comments from the Changes tab go first, as the web's comment sentences.
-        guard !composerLineComments.isEmpty else { return base }
-        return OCDiffCommentStore.composedPrompt(comments: composerLineComments, typed: base)
+    }
+
+    private var composerSendText: String {
+        let base = composerTypedText
+        // The web puts the typed text first, then the comment sentences, one per line.
+        guard !appliedLineComments.isEmpty else { return base }
+        return OCDiffCommentStore.composedPrompt(comments: appliedLineComments, typed: base)
     }
 
     /// Changes-tab line comments waiting for the next prompt (OC shell only).
     private var composerLineComments: [OCDiffComment] {
         guard ocShell != nil else { return [] }
         return OCDiffCommentStore.shared.comments(sessionID: chatClient.currentSession?.id)
+    }
+
+    /// The comments that join the prompt now: none for a slash command (the text must still start
+    /// with "/"), which leaves the chips waiting.
+    private var appliedLineComments: [OCDiffComment] {
+        guard OCDiffCommentStore.commentsApply(typed: chatClient.inputText, hasSlashChip: selectedSlashAction != nil)
+        else { return [] }
+        return composerLineComments
     }
 
     private var slashQuery: String? {

@@ -344,10 +344,19 @@ struct OCChangesS2Tests {
         let many = OCDiffComment(id: UUID(), sessionID: "s", file: "src/a.swift", startLine: 7, endLine: 9, text: "Rename", preview: "")
         #expect(one.note == "The user made the following comment regarding line 7 of src/a.swift: Why?")
         #expect(many.note == "The user made the following comment regarding lines 7 through 9 of src/a.swift: Rename")
+        // Typed text first (so a slash command keeps leading), notes after, joined by one newline.
         #expect(OCDiffCommentStore.composedPrompt(comments: [one, many], typed: "  fix it ") ==
-            one.note + "\n\n" + many.note + "\n\nfix it")
+            "fix it\n" + one.note + "\n" + many.note)
         #expect(OCDiffCommentStore.composedPrompt(comments: [one], typed: "") == one.note)
         #expect(OCDiffCommentStore.composedPrompt(comments: [], typed: "hi") == "hi")
+    }
+
+    @Test func commentsStayOutOfSlashCommands() {
+        #expect(OCDiffCommentStore.commentsApply(typed: "fix it", hasSlashChip: false))
+        #expect(OCDiffCommentStore.commentsApply(typed: "", hasSlashChip: false))
+        #expect(!OCDiffCommentStore.commentsApply(typed: "/undo", hasSlashChip: false))
+        #expect(!OCDiffCommentStore.commentsApply(typed: "  /review x", hasSlashChip: false))
+        #expect(!OCDiffCommentStore.commentsApply(typed: "", hasSlashChip: true))
     }
 
     @Test func commentStoreKeepsCommentsPerSessionAndDropsBlankOnes() throws {
