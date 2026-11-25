@@ -31,6 +31,13 @@ nonisolated struct OCTerminalEvent: Equatable, Sendable {
     let terminal: OCTerminalInfo?
 
     static let notification = Notification.Name("OpenLens.terminalListChanged")
+    /// The event stream (re)connected: events may have been missed, so every list is read again
+    /// (the web's model does the same on `server.connected`).
+    static let resyncNotification = Notification.Name("OpenLens.terminalListResync")
+
+    static func postResync() {
+        NotificationCenter.default.post(name: resyncNotification, object: nil)
+    }
 
     init(kind: Kind, sessionID: String, ptyID: String?, terminal: OCTerminalInfo?) {
         self.kind = kind
@@ -322,21 +329,30 @@ final class OCTerminalStore {
     /// Bumped by every create and close, so a list read that raced one is read again.
     @ObservationIgnored private var mutations = 0
     @ObservationIgnored private var backgrounded = false
-    @ObservationIgnored private nonisolated(unsafe) var eventObserver: NSObjectProtocol?
+    @ObservationIgnored private nonisolated(unsafe) var eventObservers: [NSObjectProtocol] = []
+    /// One list read at a time; a change announced meanwhile reads it once more afterwards.
+    @ObservationIgnored private var refreshing = false
+    @ObservationIgnored private var refreshDirty = false
 
-    init(sessionID: String, directory: String?) {
+    /// `client` is for tests; the app builds it from the connection's endpoint on `appear`.
+    init(sessionID: String, directory: String?, client: OCTerminalClient? = nil) {
         self.sessionID = sessionID
         self.directory = directory
-        eventObserver = NotificationCenter.default.addObserver(
-            forName: OCTerminalEvent.notification, object: nil, queue: .main
-        ) { [weak self] note in
-            guard let event = note.userInfo?["event"] as? OCTerminalEvent else { return }
-            MainActor.assumeIsolated { self?.receive(event) }
-        }
+        self.client = client
+        let center = NotificationCenter.default
+        eventObservers = [
+            center.addObserver(forName: OCTerminalEvent.notification, object: nil, queue: .main) { [weak self] note in
+                guard let event = note.userInfo?["event"] as? OCTerminalEvent else { return }
+                MainActor.assumeIsolated { self?.receive(event) }
+            },
+            center.addObserver(forName: OCTerminalEvent.resyncNotification, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.listChangedElsewhere() }
+            },
+        ]
     }
 
     deinit {
-        if let eventObserver { NotificationCenter.default.removeObserver(eventObserver) }
+        eventObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     /// Lists the session's terminals; the first time, an empty list gets a new terminal (the
@@ -350,24 +366,39 @@ final class OCTerminalStore {
         }
         await updateEndpoint(apiClient)
         if phase == .ready {
-            if let connection, case .failed = connection.status { connection.reconnect() } else { connection?.start() }
+            attachShown()
             await refresh()
+            attachShown()
             return
         }
         await reload()
     }
 
+    /// The visit attaches: the shown terminal (reattaching after a failure), else the first one.
+    /// Only here and on a chip tap does the app take control of a terminal.
+    private func attachShown() {
+        guard phase == .ready else { return }
+        if let connection {
+            if case .failed = connection.status { connection.reconnect() } else { connection.start() }
+        } else if let id = activeID ?? terminals.first?.id {
+            select(id)
+        }
+    }
+
     /// The server URL or credentials changed (Settings): later calls and a new attachment use them.
-    private func updateEndpoint(_ apiClient: OpenCodeClient) async {
+    /// True when it started a new attachment.
+    @discardableResult
+    private func updateEndpoint(_ apiClient: OpenCodeClient) async -> Bool {
         let endpoint = await apiClient.connectionEndpoint()
-        guard Self.endpointChanged(client, baseURL: endpoint.baseURL, authHeader: endpoint.authHeader) else { return }
+        guard Self.endpointChanged(client, baseURL: endpoint.baseURL, authHeader: endpoint.authHeader) else { return false }
         let hadClient = client != nil
         client = OCTerminalClient(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader)
-        guard hadClient, let activeID else { return }
+        guard hadClient, let activeID, connection != nil else { return false }
         connection?.disconnect()
         connection = nil
         self.activeID = nil
         select(activeID)
+        return true
     }
 
     nonisolated static func endpointChanged(_ client: OCTerminalClient?, baseURL: URL, authHeader: String?) -> Bool {
@@ -387,8 +418,10 @@ final class OCTerminalStore {
     func foreground(apiClient: OpenCodeClient?) async {
         guard backgrounded else { return }
         backgrounded = false
-        if let apiClient { await updateEndpoint(apiClient) }
-        connection?.reconnect()
+        // A changed endpoint already started a new attachment.
+        var reattached = false
+        if let apiClient { reattached = await updateEndpoint(apiClient) }
+        if !reattached { connection?.reconnect() }
         await refresh()
     }
 
@@ -420,6 +453,8 @@ final class OCTerminalStore {
             } else {
                 select(activeID.flatMap { id in items.first { $0.id == id }?.id } ?? items[0].id)
             }
+            // A change announced while the first list was on its way.
+            if refreshDirty { listChangedElsewhere() }
         } catch let error as OCTerminalClientError {
             switch error {
             case .unavailable, .outdated: phase = .unavailable(error.localizedDescription)
@@ -431,40 +466,59 @@ final class OCTerminalStore {
     }
 
     /// Reads the list again without a loading state: terminals opened elsewhere appear, closed
-    /// ones disappear (the shown one hands over to its neighbour, or only `+` stays).
+    /// ones disappear. One read at a time, applied in order; a change announced during a read
+    /// reads once more.
     func refresh() async {
-        guard let client, phase == .ready else { return }
-        for _ in 0..<2 {
-            let before = mutations
-            guard let items = try? await client.list(sessionID: sessionID) else { return }
-            // A create or close finished meanwhile: this answer may predate it.
-            guard before == mutations else { continue }
-            apply(items)
+        guard client != nil, phase == .ready else { return }
+        if refreshing {
+            refreshDirty = true
             return
         }
+        refreshing = true
+        defer { refreshing = false }
+        var attempts = 0
+        repeat {
+            refreshDirty = false
+            attempts += 1
+            guard let client else { return }
+            let before = mutations
+            guard let items = try? await client.list(sessionID: sessionID) else { return }
+            // A create or close of this screen finished meanwhile: this answer may predate it.
+            guard before == mutations else {
+                refreshDirty = true
+                continue
+            }
+            apply(items)
+        } while refreshDirty && attempts < 5
     }
 
+    /// The list as the server has it, from a change made elsewhere. It never attaches (no takeover
+    /// of a terminal someone else is using): a shown terminal that is gone hands the selection to
+    /// its neighbour, which attaches on the next visit or chip tap.
     func apply(_ items: [OCTerminalInfo]) {
         let previous = terminals
         terminals = items
-        guard let activeID else {
-            if let first = items.first { select(first.id) }
-            return
-        }
-        guard !items.contains(where: { $0.id == activeID }) else { return }
+        guard let activeID, !items.contains(where: { $0.id == activeID }) else { return }
         connection?.disconnect()
         connection = nil
-        self.activeID = nil
-        guard !items.isEmpty else { return }
         let index = previous.firstIndex { $0.id == activeID } ?? 0
-        select(items[min(index, items.count - 1)].id)
+        self.activeID = items.isEmpty ? nil : items[min(index, items.count - 1)].id
+    }
+
+    /// An event said this session's list changed (or the stream reconnected).
+    private func listChangedElsewhere() {
+        guard phase == .ready else {
+            refreshDirty = true
+            return
+        }
+        Task { await refresh() }
     }
 
     private func receive(_ event: OCTerminalEvent) {
-        guard event.sessionID == sessionID, phase == .ready else { return }
+        guard event.sessionID == sessionID else { return }
         switch event.kind {
         case .added, .removed:
-            Task { await refresh() }
+            listChangedElsewhere()
         case .updated:
             guard let info = event.terminal, let index = terminals.firstIndex(where: { $0.id == info.id }) else { return }
             terminals[index] = info
