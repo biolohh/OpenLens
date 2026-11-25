@@ -593,7 +593,10 @@ enum AppText {
     nonisolated static let ocTerminalQuoteTooLong = "Selection too long"
     nonisolated static let ocTerminalQuoteLabel = "Terminal"
     nonisolated static let ocTerminalQuoteRemove = "Remove quote"
-    nonisolated static let ocTerminalQuoteCommentTitle = "Quote"
+    nonisolated static let ocTerminalSelectionStart = "Selection start"
+    nonisolated static let ocTerminalSelectionEnd = "Selection end"
+    nonisolated static let ocTerminalQuoteDone = "Done"
+    nonisolated static let ocTerminalQuoteAddComment = "Add comment"
     nonisolated static let ocTerminalQuoteCommentPlaceholder = "Add an optional comment…"
     nonisolated static let ocTerminalQuoted = "Quoted in the chat"
     nonisolated static func ocTerminalNumbered(_ number: Int) -> String { "Terminal \(number)" }

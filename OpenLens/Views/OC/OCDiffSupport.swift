@@ -181,6 +181,8 @@ nonisolated struct OCDiffComment: Identifiable, Equatable, Sendable {
 final class OCDiffCommentStore {
     static let shared = OCDiffCommentStore()
     private(set) var all: [OCDiffComment] = []
+    /// The quote whose optional comment editor is open (the web opens it right after Quote).
+    var editingQuoteID: UUID?
 
     func comments(sessionID: String?) -> [OCDiffComment] {
         guard let sessionID else { return [] }
@@ -197,6 +199,7 @@ final class OCDiffCommentStore {
         guard !text.isEmpty else { return nil }
         let quote = OCDiffComment.terminalQuote(sessionID: sessionID, text: text)
         all.append(quote)
+        editingQuoteID = quote.id
         return quote
     }
 
@@ -228,9 +231,13 @@ final class OCDiffCommentStore {
 
     func remove(_ id: UUID) {
         all.removeAll { $0.id == id }
+        if editingQuoteID == id { editingQuoteID = nil }
     }
 
     func clear(sessionID: String) {
+        if let editingQuoteID, all.contains(where: { $0.id == editingQuoteID && $0.sessionID == sessionID }) {
+            self.editingQuoteID = nil
+        }
         all.removeAll { $0.sessionID == sessionID }
     }
 

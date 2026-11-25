@@ -222,9 +222,6 @@ struct OCComposerSendLabel: View {
 struct OCComposerCommentChips: View {
     let sessionID: String?
     private let store = OCDiffCommentStore.shared
-    /// The quote whose optional comment is being written (the web's quote comment editor).
-    @State private var commenting: OCDiffComment?
-    @State private var draft = ""
 
     var body: some View {
         let items = store.comments(sessionID: sessionID)
@@ -238,15 +235,12 @@ struct OCComposerCommentChips: View {
                     }
                 }
             }
-            .alert(AppText.ocTerminalQuoteCommentTitle, isPresented: Binding(
-                get: { commenting != nil }, set: { if !$0 { commenting = nil } }
-            )) {
-                TextField(AppText.ocTerminalQuoteCommentPlaceholder, text: $draft)
-                    .accessibilityIdentifier("oc.composer.quote.commentField")
-                Button(AppText.ocLineCommentCancel, role: .cancel) { commenting = nil }
-                Button(AppText.ocLineCommentSave) {
-                    if let commenting { store.setQuoteComment(commenting.id, text: draft) }
-                    commenting = nil
+            // The web's quote comment editor floats just above the composer.
+            .overlay(alignment: .topLeading) {
+                if let editing = items.first(where: { $0.id == store.editingQuoteID && $0.quote != nil }) {
+                    OCQuoteCommentEditor(quote: editing, store: store)
+                        .id(editing.id)
+                        .alignmentGuide(.top) { $0[.bottom] + 18 }
                 }
             }
         }
@@ -282,11 +276,11 @@ struct OCComposerCommentChips: View {
     private func quoteChip(_ comment: OCDiffComment, quote: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Button {
-                draft = comment.text
-                commenting = comment
+                store.editingQuoteID = comment.id
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(quote.replacingOccurrences(of: "\n", with: " "))
+                    // One line shows: the first 200 characters are plenty (a quote holds up to 20 000).
+                    Text(String(quote.prefix(200)).replacingOccurrences(of: "\n", with: " "))
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Color.appPrimary)
                         .lineLimit(1)
@@ -331,5 +325,66 @@ struct OCComposerCommentChips: View {
         .buttonStyle(.plain)
         .accessibilityIdentifier(id)
         .accessibilityLabel(label)
+    }
+}
+
+/// The web's quote comment editor (compact line-comment editor): the quoted text with a bar, an
+/// optional comment field and a check that saves it ("Done" when empty). It opens after Quote and
+/// on a tap on the quote's chip.
+private struct OCQuoteCommentEditor: View {
+    let quote: OCDiffComment
+    let store: OCDiffCommentStore
+    @State private var draft = ""
+    @FocusState private var focused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
+                Rectangle().fill(Color.appBorder).frame(width: 2)
+                Text(String((quote.quote ?? "").prefix(400)))
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.appSecondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 8) {
+                TextField(AppText.ocTerminalQuoteCommentPlaceholder, text: $draft, axis: .vertical)
+                    .font(.system(size: 13))
+                    .lineLimit(1...4)
+                    .focused($focused)
+                    .submitLabel(.done)
+                    .onSubmit(save)
+                    .accessibilityIdentifier("oc.composer.quote.commentField")
+                Button(action: save) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.appSecondary)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.composer.quote.done")
+                .accessibilityLabel(draft.trimmingCharacters(in: .whitespaces).isEmpty
+                    ? AppText.ocTerminalQuoteDone : AppText.ocTerminalQuoteAddComment)
+            }
+        }
+        .padding(12)
+        .frame(width: 320, alignment: .leading)
+        .background(colorScheme == .dark ? Color.appTertiary : Color.appSurface, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appBorder, lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("oc.composer.quote.editor")
+        .onAppear {
+            draft = quote.text
+            focused = true
+        }
+    }
+
+    private func save() {
+        store.setQuoteComment(quote.id, text: draft)
+        store.editingQuoteID = nil
     }
 }
