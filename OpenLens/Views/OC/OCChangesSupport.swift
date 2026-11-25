@@ -92,6 +92,21 @@ enum OCFileSupport {
         return path.hasPrefix(root) ? String(path.dropFirst(root.count)) : path
     }
 
+    /// A diff path (relative to `root`, or absolute) as the session folder sees it: relative to the
+    /// session folder when inside it, else absolute. Without a root the session folder is the base.
+    nonisolated static func sessionPath(_ path: String, root: String?, sessionDirectory: String?) -> String {
+        let absolute: String
+        if path.hasPrefix("/") {
+            absolute = path
+        } else if let root = root?.nilIfBlank, !sameFolder(root, sessionDirectory) {
+            absolute = (root.hasSuffix("/") ? root : root + "/") + path
+        } else {
+            return relative(path, to: sessionDirectory)
+        }
+        let result = relative(absolute, to: sessionDirectory)
+        return result
+    }
+
     /// Same folder, whatever the trailing slashes.
     nonisolated static func sameFolder(_ lhs: String?, _ rhs: String?) -> Bool {
         func normalized(_ value: String?) -> String? {

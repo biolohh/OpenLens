@@ -251,7 +251,7 @@ struct OCChangesView: View {
                     Spacer(minLength: 0)
                     if file.status.uppercased() != "D" {
                         Button {
-                            openFile(OCFileSupport.relative(file.path, to: session.directory))
+                            openFile(sessionPath(file))
                         } label: {
                             HStack(spacing: 5) {
                                 Image(systemName: "arrow.up.forward.square").font(.system(size: 12))
@@ -279,8 +279,12 @@ struct OCChangesView: View {
     }
 
     /// The path a comment carries: relative to the session folder, like the web's file paths.
-    private func commentPath(_ file: ReviewFileChange) -> String {
-        OCFileSupport.relative(file.path, to: session.directory)
+    private func commentPath(_ file: ReviewFileChange) -> String { sessionPath(file) }
+
+    /// One path base for comments and "Open file": diff paths are relative to the repository root
+    /// (where they were read), re-based onto the session folder like the Files tab.
+    private func sessionPath(_ file: ReviewFileChange) -> String {
+        OCFileSupport.sessionPath(file.path, root: availability?.directory, sessionDirectory: session.directory)
     }
 
     // MARK: Line comments

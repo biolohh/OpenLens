@@ -462,4 +462,12 @@ struct OCChangesS2Tests {
         let result = await task.value
         #expect(result.count == lines.count)
     }
+
+    @Test func diffPathsAreRebasedOntoTheSessionFolder() {
+        #expect(OCFileSupport.sessionPath("app/a.swift", root: "/repo", sessionDirectory: "/repo/app") == "a.swift")
+        #expect(OCFileSupport.sessionPath("lib/b.swift", root: "/repo", sessionDirectory: "/repo/app") == "/repo/lib/b.swift")
+        #expect(OCFileSupport.sessionPath("/repo/app/c.swift", root: "/repo", sessionDirectory: "/repo/app") == "c.swift")
+        #expect(OCFileSupport.sessionPath("x/y.txt", root: "/repo", sessionDirectory: "/repo") == "x/y.txt")
+        #expect(OCFileSupport.sessionPath("x/y.txt", root: nil, sessionDirectory: "/repo") == "x/y.txt")
+    }
 }
