@@ -43,6 +43,7 @@ struct OCSessionView: View {
     @Environment(\.ocShell) private var shell
     @Environment(\.connection) private var connection
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(AppRouter.self) private var router: AppRouter?
     @State private var tab: Tab = .session
     @State private var showMore = false
@@ -111,6 +112,16 @@ struct OCSessionView: View {
                 }
         )
         .toolbar(.hidden, for: .navigationBar)
+        // The terminal stays attached on every tab, so the app's background / foreground goes to
+        // it here: detach before suspension, reattach (snapshot + replay) and re-list on return.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: terminal?.background()
+            case .active:
+                if let terminal { Task { await terminal.foreground(apiClient: connection.client) } }
+            default: break
+            }
+        }
         .sheet(isPresented: $showMore, onDismiss: {
             let action = pendingMoreAction
             pendingMoreAction = nil
