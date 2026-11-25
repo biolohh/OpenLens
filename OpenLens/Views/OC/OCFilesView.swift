@@ -385,13 +385,13 @@ private struct OCFileTextView: View {
             let language = OCSyntaxLanguage.detect(path: path)
             // Split and tokenised in one pass off the main actor, so block comments and multi-line
             // strings carry across lines.
-            let segments = await Task.detached(priority: .userInitiated) {
+            let lines = await Task.detached(priority: .userInitiated) {
                 OCSyntaxHighlighter.highlight(
                     lines: OCFileSupport.cappedLines(text, maximumLines: maximum), language: language
-                )
+                ).map(OCSyntaxTheme.attributed)
             }.value
             guard !Task.isCancelled else { return }
-            state = .text(segments.map(OCSyntaxTheme.attributed))
+            state = .text(lines)
         } catch {
             guard !Task.isCancelled else { return }
             state = .failed(error.localizedDescription)

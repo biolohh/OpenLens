@@ -67,7 +67,12 @@ nonisolated enum OCSyntaxHighlighter {
         var state = State.none
         var result: [[OCSyntaxSegment]] = []
         result.reserveCapacity(lines.count)
-        for line in lines {
+        for (index, line) in lines.enumerated() {
+            // A cancelled caller discards the result: stop burning CPU, keep the shape.
+            if index % 200 == 0, Task.isCancelled {
+                result.append(contentsOf: lines[index...].map { [OCSyntaxSegment(text: $0, kind: .plain)] })
+                break
+            }
             let (segments, next) = highlight(line: line, language: language, state: state)
             result.append(segments)
             state = next
@@ -182,19 +187,28 @@ nonisolated enum OCSyntaxHighlighter {
 
         func text(_ from: Int, _ to: Int) -> String { String(chars[from..<min(to, n)]) }
 
+        /// Compares in place (no per-call allocation: this runs for every character).
         func starts(_ token: String, at index: Int) -> Bool {
-            let t = Array(token)
-            guard index + t.count <= n else { return false }
-            for k in 0..<t.count where chars[index + k] != t[k] { return false }
+            var k = index
+            for scalar in token.unicodeScalars {
+                guard k < n, chars[k] == Character(scalar) else { return false }
+                k += 1
+            }
             return true
         }
 
-        func find(_ token: String, from index: Int) -> Int? {
+        /// A token that was not found once cannot be found from a later start either: remembered,
+        /// so a line of unmatched "`" or "[" is not rescanned for every one of them.
+        var missing: Set<String> = []
+
+        mutating func find(_ token: String, from index: Int) -> Int? {
+            if missing.contains(token) { return nil }
             var k = index
             while k < n {
                 if starts(token, at: k) { return k }
                 k += 1
             }
+            missing.insert(token)
             return nil
         }
 
@@ -585,6 +599,10 @@ extension OCSyntaxHighlighter {
         var newState = State.none
         var oldState = State.none
         for (index, line) in diffLines.enumerated() {
+            if index % 200 == 0, Task.isCancelled {
+                for rest in index..<diffLines.count { result[rest] = [OCSyntaxSegment(text: diffLines[rest].text, kind: .plain)] }
+                break
+            }
             if line.isRemoved {
                 let (segments, next) = highlight(line: line.text, language: language, state: oldState)
                 result[index] = segments

@@ -169,17 +169,22 @@ final class OCDiffCommentStore {
 nonisolated final class OCDiffRender: @unchecked Sendable {
     let lines: [UnifiedDiffLine]
     let segments: [[OCSyntaxSegment]]
+    /// The coloured text of every row, built off the main actor together with the segments.
+    let attributed: [AttributedString]
     let info: [OCDiffLineInfo]
 
     init(lines: [UnifiedDiffLine], segments: [[OCSyntaxSegment]]) {
         self.lines = lines
         self.segments = segments
+        self.attributed = segments.map(OCSyntaxTheme.attributed)
         self.info = lines.map { OCDiffLineInfo(number: $0.newLineNumber ?? $0.oldLineNumber, text: $0.text) }
     }
 
+    /// Cost = characters held (text + segments + coloured text), so a few huge diffs cannot pile up.
     nonisolated static let cache: NSCache<NSString, OCDiffRender> = {
         let cache = NSCache<NSString, OCDiffRender>()
         cache.countLimit = 48
+        cache.totalCostLimit = 24_000_000
         return cache
     }()
 
@@ -187,19 +192,30 @@ nonisolated final class OCDiffRender: @unchecked Sendable {
         "\(file.path)|\(file.hashValue)" as NSString
     }
 
-    /// Hunks -> truncated lines -> highlighted segments. Pure; call it detached.
+    /// Hunks -> truncated lines -> highlighted, coloured rows. Pure; call it detached. The
+    /// highlighter starts fresh at every hunk (a hunk can open in the middle of a comment or string
+    /// that the previous hunk never closed). A cancelled build is returned but not cached.
     nonisolated static func build(file: ReviewFileChange) -> OCDiffRender {
         let key = key(for: file)
         if let hit = cache.object(forKey: key) { return hit }
-        let lines = UnifiedDiffBuilder.makeHunks(file: file).flatMap(\.lines)
+        let hunks = UnifiedDiffBuilder.makeHunks(file: file)
         let language = OCSyntaxLanguage.detect(path: file.path)
-        let texts = lines.map { OCFileSupport.truncated($0.text) }
-        let segments = OCSyntaxHighlighter.highlight(
-            diffLines: zip(lines, texts).map { (text: $1, isRemoved: $0.kind == .removed, isAdded: $0.kind == .added) },
-            language: language
-        )
+        var lines: [UnifiedDiffLine] = []
+        var segments: [[OCSyntaxSegment]] = []
+        for hunk in hunks {
+            lines += hunk.lines
+            segments += OCSyntaxHighlighter.highlight(
+                diffLines: hunk.lines.map {
+                    (text: OCFileSupport.truncated($0.text), isRemoved: $0.kind == .removed, isAdded: $0.kind == .added)
+                },
+                language: language
+            )
+        }
         let render = OCDiffRender(lines: lines, segments: segments)
-        cache.setObject(render, forKey: key)
+        if !Task.isCancelled {
+            let cost = lines.reduce(0) { $0 + $1.text.utf16.count * 3 }
+            cache.setObject(render, forKey: key, cost: cost)
+        }
         return render
     }
 }

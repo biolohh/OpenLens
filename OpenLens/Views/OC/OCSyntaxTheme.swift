@@ -1,10 +1,11 @@
 import SwiftUI
 import UIKit
 
-/// Colours of the syntax kinds. The app theme has no syntax tokens (only accent, success,
+/// Nonisolated (Color and AttributedString are plain values), so coloured lines are built off the
+/// main actor. Colours of the syntax kinds. The app theme has no syntax tokens (only accent, success,
 /// warning, danger), so this is the minimal set the highlighter needs; each kind has a light and
 /// a dark value and resolves through the current trait collection, like the theme's own tokens.
-enum OCSyntaxTheme {
+nonisolated enum OCSyntaxTheme {
     private static func pair(_ light: UInt32, _ dark: UInt32) -> Color {
         func ui(_ hex: UInt32) -> UIColor {
             UIColor(

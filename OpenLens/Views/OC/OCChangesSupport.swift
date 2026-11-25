@@ -284,7 +284,6 @@ struct OCDiffBlock: View {
     var onLineCount: (Int) -> Void = { _ in }
 
     @State private var render: OCDiffRender?
-    @State private var attributed: [AttributedString] = []
     @State private var limit = 0
     @State private var availableWidth: CGFloat = 0
 
@@ -303,7 +302,6 @@ struct OCDiffBlock: View {
                 OCDiffRender.build(file: file)
             }.value
             guard !Task.isCancelled else { return }
-            attributed = built.segments.map(OCSyntaxTheme.attributed)
             render = built
             onLineCount(built.lines.count)
         }
@@ -383,7 +381,7 @@ struct OCDiffBlock: View {
                 .fontWeight(isCommented(line) ? .bold : .regular)
                 .foregroundStyle(isCommented(line) ? Color.appAccent : Color.appSecondary)
                 .frame(width: showsLineNumbers ? 38 : 4, alignment: .trailing)
-            Text(index < attributed.count ? attributed[index] : AttributedString(line.text))
+            Text(index < render.attributed.count ? render.attributed[index] : AttributedString(line.text))
                 .font(.openLensMono(size: 12))
                 .foregroundStyle(Color.appPrimary)
                 .lineLimit(wraps ? nil : 1)

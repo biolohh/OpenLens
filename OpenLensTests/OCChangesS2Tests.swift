@@ -438,4 +438,28 @@ struct OCChangesS2Tests {
         #expect(!text.contains("a+b"))
         #expect(s2Query(request, "location[directory]") == "/x/a+b c")
     }
+
+    @Test func highlighterStartsFreshAtEveryHunk() {
+        let patch = "--- a/x.swift\n+++ b/x.swift\n@@ -1,1 +1,1 @@\n-x\n+/* never closed\n@@ -20,1 +20,1 @@\n-y\n+let a = 1\n"
+        let file = ReviewFileChange(diff: OCFileDiff(file: "reset.swift", status: "modified", additions: 2, deletions: 2, patchText: patch))
+        let render = OCDiffRender.build(file: file)
+        let last = render.segments.last ?? []
+        #expect(last.contains { $0.text.trimmingCharacters(in: .whitespaces) == "let" && $0.kind == .keyword })
+        #expect(render.attributed.count == render.lines.count)
+    }
+
+    @Test func unmatchedMarkdownMarkersStayLinear() {
+        let line = String(repeating: "[`", count: 250)
+        let result = OCSyntaxHighlighter.highlight(lines: [line, line, line], language: .markdown)
+        #expect(result.count == 3)
+        #expect(result[0].map(\.text).joined() == line)
+    }
+
+    @Test func aCancelledHighlightKeepsItsShape() async {
+        let lines = (0..<1000).map { "let a\($0) = 1" }
+        let task = Task.detached { OCSyntaxHighlighter.highlight(lines: lines, language: .swift) }
+        task.cancel()
+        let result = await task.value
+        #expect(result.count == lines.count)
+    }
 }
