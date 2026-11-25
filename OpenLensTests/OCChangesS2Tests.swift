@@ -500,6 +500,23 @@ struct OCChangesS2Tests {
         #expect(saved.side == .deletions)
     }
 
+    @Test func cancellationReachesTheDetachedWork() async {
+        // The work spins until it sees its own task cancelled (at most 5 s); a plain detached task
+        // would never see the caller's cancellation.
+        let caller = Task {
+            await OCFileSupport.runCancellable { () -> Bool in
+                for _ in 0..<500 {
+                    if Task.isCancelled { return true }
+                    Thread.sleep(forTimeInterval: 0.01)
+                }
+                return false
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        caller.cancel()
+        #expect(await caller.value)
+    }
+
     @Test func editingACommentChangesItsText() throws {
         let store = OCDiffCommentStore()
         let selection = OCDiffSelection(file: "a", rows: 0...0, startLine: 1, endLine: 1, preview: "p")

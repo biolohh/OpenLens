@@ -481,11 +481,11 @@ private struct OCFileTextView: View {
                 let language = OCSyntaxLanguage.detect(path: path)
                 // Split and tokenised in one pass off the main actor, so block comments and multi-line
                 // strings carry across lines.
-                let lines = await Task.detached(priority: .userInitiated) {
+                let lines = await OCFileSupport.runCancellable {
                     OCSyntaxHighlighter.highlight(
                         lines: OCFileSupport.cappedLines(text, maximumLines: maximum), language: language
                     ).map(OCSyntaxTheme.attributed)
-                }.value
+                }
                 guard !Task.isCancelled else { return }
                 state = .text(lines: lines, markdown: kind == .markdown ? text : nil)
             }

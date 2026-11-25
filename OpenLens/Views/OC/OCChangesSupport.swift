@@ -138,6 +138,15 @@ enum OCFileSupport {
 
     /// The first `maximumLines` lines of a file, each cut at `maximumLineCharacters`; the rest of a
     /// huge file is never split or mapped.
+    /// Runs blocking work off the main actor and hands the caller's cancellation on to it: a plain
+    /// `Task.detached` does not inherit it, so a closed file would keep its highlighter running.
+    nonisolated static func runCancellable<T: Sendable>(
+        _ work: @escaping @Sendable () -> T
+    ) async -> T {
+        let task = Task.detached(priority: .userInitiated, operation: work)
+        return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+    }
+
     nonisolated static func cappedLines(_ text: String, maximumLines: Int) -> [String] {
         text.split(separator: "\n", maxSplits: maximumLines, omittingEmptySubsequences: false)
             .prefix(maximumLines)
@@ -319,9 +328,7 @@ struct OCDiffBlock: View {
         }
         .task(id: file) {
             let file = file
-            let built = await Task.detached(priority: .userInitiated) {
-                OCDiffRender.build(file: file)
-            }.value
+            let built = await OCFileSupport.runCancellable { OCDiffRender.build(file: file) }
             guard !Task.isCancelled else { return }
             render = built
             onLineCount(built.lines.count)
