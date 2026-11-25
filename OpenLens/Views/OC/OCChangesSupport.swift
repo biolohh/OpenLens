@@ -294,7 +294,7 @@ struct OCDiffBlock: View {
     /// The Changes tab lets rows be selected for a comment; nil = rows are not tappable.
     var selection: Binding<OCDiffSelection?>?
     /// File line numbers that carry a comment (marked in the gutter).
-    var commentedLines: [ClosedRange<Int>] = []
+    var commentedLines: [OCCommentedRange] = []
     /// Reports how many diff lines exist (nil until the hunks are built).
     var onLineCount: (Int) -> Void = { _ in }
 
@@ -383,8 +383,9 @@ struct OCDiffBlock: View {
     }
 
     private func isCommented(_ line: UnifiedDiffLine) -> Bool {
-        guard let number = line.newLineNumber ?? line.oldLineNumber else { return false }
-        return commentedLines.contains { $0.contains(number) }
+        let side: OCDiffSide = line.kind == .removed ? .deletions : .additions
+        guard let number = side == .deletions ? line.oldLineNumber : line.newLineNumber else { return false }
+        return commentedLines.contains { $0.side == side && $0.range.contains(number) }
     }
 
     @ViewBuilder
@@ -449,7 +450,7 @@ struct OCGuardedDiff: View {
     let file: ReviewFileChange
     var showsLineNumbers = true
     var selection: Binding<OCDiffSelection?>?
-    var commentedLines: [ClosedRange<Int>] = []
+    var commentedLines: [OCCommentedRange] = []
     @AppStorage(OCDiffSettings.wrapKey) private var wraps = true
     @State private var loads = false
 

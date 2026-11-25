@@ -271,7 +271,7 @@ struct OCChangesView: View {
                 OCGuardedDiff(
                     file: file,
                     selection: $selection,
-                    commentedLines: comments.comments(sessionID: session.id, file: commentPath(file)).map { $0.startLine...$0.endLine }
+                    commentedLines: comments.comments(sessionID: session.id, file: commentPath(file)).map { OCCommentedRange(range: $0.startLine...$0.endLine, side: $0.side) }
                 )
                 commentArea(for: file)
             }

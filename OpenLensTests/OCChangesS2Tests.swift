@@ -470,4 +470,21 @@ struct OCChangesS2Tests {
         #expect(OCFileSupport.sessionPath("x/y.txt", root: "/repo", sessionDirectory: "/repo") == "x/y.txt")
         #expect(OCFileSupport.sessionPath("x/y.txt", root: nil, sessionDirectory: "/repo") == "x/y.txt")
     }
+
+    @Test func selectionsAndCommentsCarryTheirSide() throws {
+        // Removed rows number the old file, the others the new one; the same number is not the same line.
+        let rows = [
+            OCDiffLineInfo(number: 12, text: "old", side: .deletions),
+            OCDiffLineInfo(number: 12, text: "new", side: .additions),
+            OCDiffLineInfo(number: 13, text: "new2", side: .additions),
+        ]
+        let removed = try #require(OCDiffSelection.toggled(nil, file: "a", row: 0, lines: rows))
+        #expect(removed.side == .deletions && removed.startLine == 12 && removed.endLine == 12)
+        // A range ending on an added row counts that side only.
+        let range = try #require(OCDiffSelection.toggled(removed, file: "a", row: 2, lines: rows))
+        #expect(range.side == .additions && range.startLine == 13 && range.endLine == 13)
+        let store = OCDiffCommentStore()
+        let saved = try #require(store.add(sessionID: "s", file: "a", selection: removed, text: "x"))
+        #expect(saved.side == .deletions)
+    }
 }

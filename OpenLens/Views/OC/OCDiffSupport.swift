@@ -57,6 +57,16 @@ extension OCFileSupport {
 
 // MARK: - Line selection
 
+/// Which file a diff line belongs to: removed rows are the old file, the rest the new one. Line
+/// numbers of the two sides are separate, so selections and comments carry the side (as the web's).
+nonisolated enum OCDiffSide: Sendable { case additions, deletions }
+
+/// A commented run of lines on one side (marks the gutter).
+nonisolated struct OCCommentedRange: Sendable {
+    let range: ClosedRange<Int>
+    let side: OCDiffSide
+}
+
 /// A selected run of diff rows of one file: row indexes for the highlight, file line numbers
 /// for the comment ("lines 12 through 14 of path").
 nonisolated struct OCDiffSelection: Equatable, Sendable {
@@ -65,6 +75,8 @@ nonisolated struct OCDiffSelection: Equatable, Sendable {
     let startLine: Int
     let endLine: Int
     let preview: String
+    /// The side of the last tapped row; the line numbers count that side only.
+    var side: OCDiffSide = .additions
 
     /// Tap logic of the mobile diff: a first tap selects a line, a second tap on another line
     /// extends it to a range, a tap on the selected line (or a third tap) starts over.
@@ -83,10 +95,11 @@ nonisolated struct OCDiffSelection: Equatable, Sendable {
         } else {
             rows = row...row
         }
-        let numbers = rows.compactMap { lines[$0].number }
+        let side = lines[row].side
+        let numbers = rows.compactMap { lines[$0].side == side ? lines[$0].number : nil }
         guard let first = numbers.min(), let last = numbers.max() else { return nil }
-        let preview = rows.prefix(3).map { lines[$0].text }.joined(separator: "\n")
-        return OCDiffSelection(file: file, rows: rows, startLine: first, endLine: last, preview: preview)
+        let preview = rows.filter { lines[$0].side == side }.prefix(3).map { lines[$0].text }.joined(separator: "\n")
+        return OCDiffSelection(file: file, rows: rows, startLine: first, endLine: last, preview: preview, side: side)
     }
 }
 
@@ -94,6 +107,7 @@ nonisolated struct OCDiffSelection: Equatable, Sendable {
 nonisolated struct OCDiffLineInfo: Sendable {
     let number: Int?
     let text: String
+    var side: OCDiffSide = .additions
 }
 
 // MARK: - Line comments (the composer context)
@@ -106,6 +120,7 @@ nonisolated struct OCDiffComment: Identifiable, Equatable, Sendable {
     let endLine: Int
     let text: String
     let preview: String
+    var side: OCDiffSide = .additions
 
     /// The sentence the model receives, word for word the web's `formatCommentNote`.
     var note: String {
@@ -136,7 +151,8 @@ final class OCDiffCommentStore {
         guard !trimmed.isEmpty else { return nil }
         let comment = OCDiffComment(
             id: UUID(), sessionID: sessionID, file: file,
-            startLine: selection.startLine, endLine: selection.endLine, text: trimmed, preview: selection.preview
+            startLine: selection.startLine, endLine: selection.endLine, text: trimmed, preview: selection.preview,
+            side: selection.side
         )
         all.append(comment)
         return comment
@@ -177,7 +193,10 @@ nonisolated final class OCDiffRender: @unchecked Sendable {
         self.lines = lines
         self.segments = segments
         self.attributed = segments.map(OCSyntaxTheme.attributed)
-        self.info = lines.map { OCDiffLineInfo(number: $0.newLineNumber ?? $0.oldLineNumber, text: $0.text) }
+        self.info = lines.map { OCDiffLineInfo(
+            number: $0.kind == .removed ? $0.oldLineNumber : $0.newLineNumber, text: $0.text,
+            side: $0.kind == .removed ? .deletions : .additions
+        ) }
     }
 
     /// Cost = characters held (text + segments + coloured text), so a few huge diffs cannot pile up.
