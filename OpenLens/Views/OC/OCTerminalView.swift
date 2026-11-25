@@ -11,7 +11,6 @@ struct OCTerminalView: View {
     /// The web seeds a terminal on an empty session only in its mobile placement; a regular-width
     /// layout behaves like the desktop panel and waits for `+`.
     @Environment(\.horizontalSizeClass) private var sizeClass
-    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -28,14 +27,6 @@ struct OCTerminalView: View {
                 isV2: connection.serverCapabilities?.protocolVersion == .v2,
                 seedsEmpty: sizeClass != .regular
             )
-        }
-        // Returning from the background reattaches (snapshot + replay) and re-reads the list.
-        .onChange(of: scenePhase) { _, phase in
-            switch phase {
-            case .background: store.background()
-            case .active: Task { await store.foreground(apiClient: connection.client) }
-            default: break
-            }
         }
         .alert(
             store.actionError ?? "",
@@ -178,8 +169,16 @@ private struct OCTerminalSurface: View {
     /// Where the edit menu points (in the viewport), set when a selection gesture ends.
     @State private var menuRequest: OCTerminalMenuRequest?
     @State private var quotedNotice = false
+    /// When the long press last reported: the tap that ends the same touch must not clear the
+    /// selection it just made.
+    @State private var lastSelectGesture = Date.distantPast
+    /// Where the menu was last shown, to show it again after a handle drag.
+    @State private var lastMenuPoint = CGPoint(x: 80, y: 40)
+    /// The selection as a handle drag began (the edge being moved and its cell centre).
+    @State private var handleDrag: (edge: OCTerminalSelection.Edge, origin: CGPoint)?
 
     private static let viewport = "oc.terminal.viewport"
+    private static let rows = "oc.terminal.rows"
 
     private static let fontSize: CGFloat = 13
     private static let horizontalPadding: CGFloat = 12
@@ -217,6 +216,7 @@ private struct OCTerminalSurface: View {
                 applicationCursorKeys: connection.applicationCursorKeys,
                 send: { data in
                     followsOutput = true
+                    endSelection()
                     connection.input(data)
                 }
             )
@@ -224,6 +224,8 @@ private struct OCTerminalSurface: View {
         .background(
             OCTerminalKeyboard(focused: $keyboardFocused) { event in
                 followsOutput = true
+                // Typing ends a selection, so the new output is followed again.
+                endSelection()
                 switch event {
                 case .text(let text):
                     let data = OCTerminalKeys.encode(text, control: controlArmed)
@@ -265,6 +267,8 @@ private struct OCTerminalSurface: View {
                     .gesture(OCTerminalSelectGesture(viewport: Self.viewport) { phase, point, viewportPoint in
                         select(phase, at: point, viewportPoint: viewportPoint)
                     })
+                    .overlay(alignment: .topLeading) { handles }
+                    .coordinateSpace(.named(Self.rows))
                     .padding(.horizontal, Self.horizontalPadding)
                     .padding(.vertical, Self.verticalPadding)
                     // At least the pane's height, so the part of a row left over goes below the
@@ -301,6 +305,8 @@ private struct OCTerminalSurface: View {
             }
             .contentShape(Rectangle())
             .onTapGesture {
+                // The release of the long press that just selected is not a tap.
+                guard Date().timeIntervalSince(lastSelectGesture) > 0.5 else { return }
                 // A tap ends a selection first; otherwise it brings up the keyboard.
                 if selection != nil {
                     selection = nil
@@ -329,6 +335,13 @@ private struct OCTerminalSurface: View {
                         .transition(.opacity)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                // The selected text for UI tests (not read by VoiceOver).
+                Color.clear.frame(width: 1, height: 1)
+                    .accessibilityElement()
+                    .accessibilityIdentifier("oc.terminal.selection")
+                    .accessibilityValue(selection == nil ? "" : String(selectedText.prefix(200)))
+            }
             .coordinateSpace(.named(Self.viewport))
             .onAppear { report(proxy.size) }
             .onChange(of: proxy.size) { _, size in report(size) }
@@ -337,6 +350,84 @@ private struct OCTerminalSurface: View {
     }
 
     // MARK: Selection
+
+    private func endSelection() {
+        guard selection != nil else { return }
+        selection = nil
+        menuRequest = nil
+    }
+
+    /// Index of a line by id: ids count up one per line, so it is the offset from the first.
+    private func row(of id: Int) -> Int? {
+        let lines = connection.lines
+        guard let first = lines.first?.id else { return nil }
+        let index = id - first
+        if lines.indices.contains(index), lines[index].id == id { return index }
+        return lines.firstIndex { $0.id == id }
+    }
+
+    /// Where an edge of the selection is drawn: the start at its first cell's top left, the end
+    /// after its last cell (a row selected through its end stops at the row's text).
+    private func handlePosition(_ edge: OCTerminalSelection.Edge, of selection: OCTerminalSelection) -> CGPoint? {
+        let point = edge == .start ? selection.start : selection.end
+        guard let index = row(of: point.line) else { return nil }
+        let line = connection.lines[index]
+        let y = CGFloat(index) * metrics.lineHeight
+        switch edge {
+        case .start:
+            return CGPoint(x: CGFloat(point.column) * metrics.cellWidth, y: y)
+        case .end:
+            let textEnd = line.cells().last.map { $0.column + $0.width } ?? 0
+            let column = point.column >= OCTerminalSelection.lineEnd ? max(textEnd, 1) : point.column + 1
+            return CGPoint(x: CGFloat(column) * metrics.cellWidth, y: y + metrics.lineHeight)
+        }
+    }
+
+    /// The two handles that adjust a selection, as text selection does elsewhere on iOS.
+    @ViewBuilder
+    private var handles: some View {
+        if let selection {
+            ForEach([OCTerminalSelection.Edge.start, .end], id: \.self) { edge in
+                if let position = handlePosition(edge, of: selection) {
+                    OCTerminalHandle(edge: edge, height: metrics.lineHeight)
+                        // The bar spans the edge's row; the knob (10 pt) sits outside it.
+                        .position(
+                            x: position.x,
+                            y: edge == .start ? position.y + metrics.lineHeight / 2 - 5 : position.y - metrics.lineHeight / 2 + 5
+                        )
+                        .highPriorityGesture(
+                            DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.rows))
+                                .onChanged { value in moveHandle(edge, from: position, by: value.translation) }
+                                .onEnded { _ in
+                                    handleDrag = nil
+                                    lastSelectGesture = Date()
+                                    menuRequest = OCTerminalMenuRequest(point: lastMenuPoint)
+                                }
+                        )
+                        .accessibilityElement()
+                        .accessibilityLabel(edge == .start ? AppText.ocTerminalSelectionStart : AppText.ocTerminalSelectionEnd)
+                        .accessibilityIdentifier(edge == .start ? "oc.terminal.handle.start" : "oc.terminal.handle.end")
+                }
+            }
+        }
+    }
+
+    private func moveHandle(_ edge: OCTerminalSelection.Edge, from position: CGPoint, by translation: CGSize) {
+        guard let selection else { return }
+        if handleDrag == nil {
+            // The centre of the edge's cell, so the finger moves that cell.
+            let origin = edge == .start
+                ? CGPoint(x: position.x + metrics.cellWidth / 2, y: position.y + metrics.lineHeight / 2)
+                : CGPoint(x: position.x - metrics.cellWidth / 2, y: position.y - metrics.lineHeight / 2)
+            handleDrag = (edge, origin)
+            menuRequest = nil
+        }
+        guard let drag = handleDrag,
+              let point = point(at: CGPoint(x: drag.origin.x + translation.width, y: drag.origin.y + translation.height))
+        else { return }
+        let moved = selection.moving(drag.edge, to: point)
+        if moved != selection { self.selection = moved }
+    }
 
     /// The cell under a point of the rows (content coordinates).
     private func point(at location: CGPoint) -> OCTerminalPoint? {
@@ -349,6 +440,7 @@ private struct OCTerminalSurface: View {
     }
 
     private func select(_ phase: OCTerminalSelectGesture.Phase, at location: CGPoint, viewportPoint: CGPoint) {
+        lastSelectGesture = Date()
         switch phase {
         case .began:
             guard let point = point(at: location) else { return }
@@ -372,6 +464,7 @@ private struct OCTerminalSurface: View {
             selection = current
         case .ended:
             guard selection != nil else { return }
+            lastMenuPoint = viewportPoint
             menuRequest = OCTerminalMenuRequest(point: viewportPoint)
         case .cancelled:
             break
@@ -383,7 +476,7 @@ private struct OCTerminalSurface: View {
     }
 
     private var quoteAllowed: Bool {
-        OCTerminalSelection.quoteText(selectedText).count <= OCTerminalSelection.quoteLimit
+        OCTerminalSelection.fitsQuote(OCTerminalSelection.quoteText(selectedText))
     }
 
     private func perform(_ action: OCTerminalEditMenu.Action) {
@@ -394,7 +487,7 @@ private struct OCTerminalSurface: View {
             selection = nil
         case .quote:
             let text = OCTerminalSelection.quoteText(selectedText)
-            guard !text.isEmpty, text.count <= OCTerminalSelection.quoteLimit else { return }
+            guard !text.isEmpty, OCTerminalSelection.fitsQuote(text) else { return }
             OCDiffCommentStore.shared.addQuote(sessionID: sessionID, text: text)
             selection = nil
             withAnimation { quotedNotice = true }
@@ -404,11 +497,7 @@ private struct OCTerminalSurface: View {
             }
         case .selectAll:
             selection = OCTerminalSelection.all(connection.lines)
-            if let current = menuRequest?.point {
-                menuRequest = OCTerminalMenuRequest(point: current)
-            } else {
-                menuRequest = OCTerminalMenuRequest(point: CGPoint(x: 80, y: 40))
-            }
+            menuRequest = OCTerminalMenuRequest(point: lastMenuPoint)
         }
     }
 
@@ -593,6 +682,27 @@ private struct OCTerminalSelectGesture: UIGestureRecognizerRepresentable {
         default: return
         }
         onChange(phase, context.converter.localLocation, context.converter.location(in: .named(viewport)))
+    }
+}
+
+/// A selection handle: a bar the height of a row with a knob above (start) or below (end).
+private struct OCTerminalHandle: View {
+    let edge: OCTerminalSelection.Edge
+    let height: CGFloat
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if edge == .start { knob }
+            Rectangle().fill(Color.accentColor).frame(width: 2, height: height)
+            if edge == .end { knob }
+        }
+        // A finger-sized hit area around the thin handle.
+        .frame(width: 32, height: height + 28)
+        .contentShape(Rectangle())
+    }
+
+    private var knob: some View {
+        Circle().fill(Color.accentColor).frame(width: 10, height: 10)
     }
 }
 

@@ -91,8 +91,21 @@ nonisolated struct OCTerminalSelection: Equatable, Sendable {
     /// The web's `TERMINAL_QUOTE_MAX_LENGTH` (the timeline's limit).
     static let quoteLimit = 20_000
 
+    enum Edge: Hashable, Sendable { case start, end }
+
     var anchor: OCTerminalPoint
     var head: OCTerminalPoint
+
+    /// A handle drag: the other edge stays, the dragged one follows the finger (past the other
+    /// edge they swap, as with text selection).
+    func moving(_ edge: Edge, to point: OCTerminalPoint) -> OCTerminalSelection {
+        OCTerminalSelection(anchor: edge == .start ? end : start, head: point)
+    }
+
+    /// The web's limit counts UTF-16 code units (JavaScript string length).
+    static func fitsQuote(_ text: String) -> Bool {
+        text.utf16.count <= quoteLimit
+    }
 
     var start: OCTerminalPoint { min(anchor, head) }
     var end: OCTerminalPoint { max(anchor, head) }
