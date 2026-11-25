@@ -419,7 +419,10 @@ struct OCChangesView: View {
                         .accessibilityIdentifier("oc.changes.createGit.error")
                 }
             }
-            .accessibilityIdentifier("oc.placeholder")
+            // A marker, not an identifier on the stack (that one would replace the button's).
+            .overlay(alignment: .topLeading) {
+                Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.placeholder")
+            }
         }
     }
 
