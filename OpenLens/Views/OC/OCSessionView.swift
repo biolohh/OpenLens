@@ -155,7 +155,12 @@ struct OCSessionView: View {
             terminal?.disconnect()
             terminal = nil
         }
-        .onDisappear { terminal?.disconnect() }
+        .onDisappear {
+            terminal?.disconnect()
+            // An open quote comment editor doesn't pop up again when the screen returns (its
+            // draft is already saved on the quote).
+            OCDiffCommentStore.shared.editingQuoteID = nil
+        }
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.session")
         }

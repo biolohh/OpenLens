@@ -354,9 +354,9 @@ private struct OCQuoteCommentEditor: View {
             }
             .fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 8) {
-                TextField(AppText.ocTerminalQuoteCommentPlaceholder, text: $draft, axis: .vertical)
+                // One line, so Return submits (the web's Enter), never a newline.
+                TextField(AppText.ocTerminalQuoteCommentPlaceholder, text: $draft)
                     .font(.system(size: 13))
-                    .lineLimit(1...4)
                     .focused($focused)
                     .submitLabel(.done)
                     .onSubmit(save)
@@ -385,6 +385,9 @@ private struct OCQuoteCommentEditor: View {
             draft = quote.text
             focused = true
         }
+        // The draft is the comment as it is typed: Send, another chip or leaving never loses it.
+        .onChange(of: draft) { _, text in store.setQuoteComment(quote.id, text: text) }
+        .onDisappear { store.setQuoteComment(quote.id, text: draft) }
     }
 
     private func save() {
