@@ -622,6 +622,11 @@ final class OpenLensSmokeTests: XCTestCase {
         let output = app.staticTexts["openlens-smoke"].firstMatch
         XCTAssertTrue(output.waitForExistence(timeout: 10), "echo output did not come back from the terminal")
         walkTerminalSelection(in: app, output: output)
+        // Back from the Session tab: type only if this run's own terminal is still the one shown.
+        guard ownSelected.waitForExistence(timeout: 10) else {
+            XCTFail("After quoting, the shown terminal is not this run's; not typing into it")
+            return
+        }
         screen.tap()
         sleep(1)
         app.typeText("ls\n")
@@ -656,11 +661,20 @@ final class OpenLensSmokeTests: XCTestCase {
         func menuItem(_ title: String) -> XCUIElement {
             app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
         }
+        let selected = app.descendants(matching: .any).matching(identifier: "oc.terminal.selection").firstMatch
+        func selectedText() -> String { (selected.value as? String) ?? "" }
         guard output.waitForExistence(timeout: 5) else {
             XCTFail("Terminal output line not on screen for selecting")
             return
         }
-        output.press(forDuration: 1.0)
+        // Long press, then drag down onto the prompt line: the selection extends across lines.
+        let promptLine = app.staticTexts.matching(NSPredicate(format: "label ENDSWITH '$'")).firstMatch
+        if promptLine.waitForExistence(timeout: 3) {
+            output.press(forDuration: 1.0, thenDragTo: promptLine)
+            XCTAssertTrue(selectedText().hasPrefix("openlens-smoke\n"), "Drag after the long press did not extend the selection: \(selectedText())")
+        } else {
+            output.press(forDuration: 1.0)
+        }
         let copy = menuItem("Copy")
         XCTAssertTrue(copy.waitForExistence(timeout: 5), "Long press on terminal output did not show the edit menu")
         XCTAssertTrue(menuItem("Quote").exists, "Edit menu lacks Quote")
@@ -672,16 +686,38 @@ final class OpenLensSmokeTests: XCTestCase {
             XCTFail("Terminal output line gone before quoting")
             return
         }
+        // A plain long press takes the word; its end handle then extends it to the next row.
         output.press(forDuration: 1.0)
+        XCTAssertEqual(selectedText(), "openlens-smoke", "Long press did not select the word")
+        let handle = app.descendants(matching: .any).matching(identifier: "oc.terminal.handle.end").firstMatch
+        XCTAssertTrue(handle.waitForExistence(timeout: 3), "Selection has no end handle")
+        if handle.exists {
+            let start = handle.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.2, thenDragTo: start.withOffset(CGVector(dx: 40, dy: 20)))
+            sleep(1)
+            XCTAssertTrue(selectedText().hasPrefix("openlens-smoke\n"), "Dragging the end handle did not extend the selection: \(selectedText())")
+            snapshot("03-chat-terminal-handles")
+        }
         let quote = menuItem("Quote")
-        XCTAssertTrue(quote.waitForExistence(timeout: 5), "Second selection showed no Quote")
+        if !quote.waitForExistence(timeout: 3) {
+            // The menu returns after a handle drag; if not, a fresh press shows it.
+            output.press(forDuration: 1.0)
+        }
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), "Selection showed no Quote")
         guard quote.exists else { return }
         quote.tap()
         sleep(1)
         app.buttons["oc.tab.session"].tap()
         let chip = app.descendants(matching: .any).matching(identifier: "oc.composer.quote").firstMatch
         XCTAssertTrue(chip.waitForExistence(timeout: 5), "Quoted terminal text is not in the composer")
+        // As on the web, the optional comment editor is open over the composer; Done closes it.
+        let editor = app.descendants(matching: .any).matching(identifier: "oc.composer.quote.editor").firstMatch
+        XCTAssertTrue(editor.waitForExistence(timeout: 3), "No comment editor after Quote")
         snapshot("03-chat-terminal-quote-chip")
+        let done = app.buttons["oc.composer.quote.done"]
+        if done.exists { done.tap() }
+        sleep(1)
+        XCTAssertFalse(editor.exists, "Comment editor did not close")
         removeQuoteChips(in: app)
         XCTAssertFalse(chip.exists, "Quote chip still in the composer")
         app.buttons["oc.tab.more"].tap()
