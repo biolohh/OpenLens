@@ -35,6 +35,105 @@ nonisolated struct OCTerminalLine: Hashable, Sendable, Identifiable {
     let runs: [OCTerminalRun]
 
     var text: String { runs.map(\.text).joined() }
+
+    /// The characters with the columns they cover (a wide character takes two).
+    func cells() -> [(column: Int, width: Int, text: String)] {
+        var result: [(column: Int, width: Int, text: String)] = []
+        var column = 0
+        for character in text {
+            let width = character.unicodeScalars.first.map(OCTerminalEmulator.width(of:)) ?? 1
+            result.append((column, width, String(character)))
+            column += width
+        }
+        return result
+    }
+
+    /// The text drawn in `columns`; a wide character counts when any of its cells is inside.
+    func text(columns: ClosedRange<Int>) -> String {
+        cells().filter { $0.column <= columns.upperBound && $0.column + $0.width - 1 >= columns.lowerBound }
+            .map(\.text).joined()
+    }
+
+    /// The first column of the character drawn at `column` (the left half of a wide character).
+    func cellStart(_ column: Int) -> Int {
+        cells().last { $0.column <= column }.map { $0.column + $0.width > column ? $0.column : column } ?? column
+    }
+
+    /// The word (a run without spaces) at `column`, for a long press; nil on a blank.
+    func word(at column: Int) -> ClosedRange<Int>? {
+        let cells = cells()
+        guard let index = cells.firstIndex(where: { $0.column <= column && column < $0.column + $0.width }),
+              !cells[index].text.allSatisfy(\.isWhitespace) else { return nil }
+        var first = index
+        var last = index
+        while first > 0, !cells[first - 1].text.allSatisfy(\.isWhitespace) { first -= 1 }
+        while last + 1 < cells.count, !cells[last + 1].text.allSatisfy(\.isWhitespace) { last += 1 }
+        return cells[first].column...(cells[last].column + cells[last].width - 1)
+    }
+}
+
+/// A cell of the terminal's lines, anchored to a line id (not a screen row), so new output
+/// scrolling the line up doesn't move the selection.
+nonisolated struct OCTerminalPoint: Hashable, Comparable, Sendable {
+    var line: Int
+    var column: Int
+
+    static func < (lhs: OCTerminalPoint, rhs: OCTerminalPoint) -> Bool {
+        (lhs.line, lhs.column) < (rhs.line, rhs.column)
+    }
+}
+
+/// Selected text, from the cell pressed first (`anchor`) to the one under the finger (`head`),
+/// both inclusive and in reading order like a terminal's selection.
+nonisolated struct OCTerminalSelection: Equatable, Sendable {
+    /// Columns past the line's end (a row selected through its end).
+    static let lineEnd = 100_000
+    /// The web's `TERMINAL_QUOTE_MAX_LENGTH` (the timeline's limit).
+    static let quoteLimit = 20_000
+
+    var anchor: OCTerminalPoint
+    var head: OCTerminalPoint
+
+    var start: OCTerminalPoint { min(anchor, head) }
+    var end: OCTerminalPoint { max(anchor, head) }
+
+    /// The selected columns of a line, nil when it is outside the selection.
+    func columns(line id: Int) -> ClosedRange<Int>? {
+        let start = start
+        let end = end
+        guard id >= start.line, id <= end.line else { return nil }
+        let first = id == start.line ? start.column : 0
+        let last = id == end.line ? end.column : Self.lineEnd
+        return first <= last ? first...last : nil
+    }
+
+    /// The selection as copied: each line's selected cells with trailing blanks dropped, one line
+    /// per row (a wrapped row stays its own line, as on the web).
+    func text(in lines: [OCTerminalLine]) -> String {
+        lines.compactMap { line -> String? in
+            guard let columns = columns(line: line.id) else { return nil }
+            var text = line.text(columns: columns)
+            while text.last?.isWhitespace == true { text.removeLast() }
+            return text
+        }.joined(separator: "\n")
+    }
+
+    /// The web's quote text: leading empty lines and trailing whitespace dropped.
+    static func quoteText(_ text: String) -> String {
+        var result = Substring(text)
+        while result.first == "\n" { result.removeFirst() }
+        while result.last?.isWhitespace == true { result.removeLast() }
+        return String(result)
+    }
+
+    /// Everything the view shows.
+    static func all(_ lines: [OCTerminalLine]) -> OCTerminalSelection? {
+        guard let first = lines.first, let last = lines.last else { return nil }
+        return OCTerminalSelection(
+            anchor: OCTerminalPoint(line: first.id, column: 0),
+            head: OCTerminalPoint(line: last.id, column: lineEnd)
+        )
+    }
 }
 
 /// A minimal VT100/xterm screen for line-based shell use: UTF-8, cursor movement, erase, scroll
@@ -108,8 +207,9 @@ nonisolated struct OCTerminalEmulator {
     // MARK: Output
 
     /// The history, then every screen row; trailing blanks in default colours are dropped.
+    /// On the alternate screen (`less`, `vim`, `top`) only that screen, as a terminal shows it.
     func lines(showCursor: Bool) -> [OCTerminalLine] {
-        history + screenLines(showCursor: showCursor)
+        alternateScreen ? screenLines(showCursor: showCursor) : history + screenLines(showCursor: showCursor)
     }
 
     func screenLines(showCursor: Bool) -> [OCTerminalLine] {

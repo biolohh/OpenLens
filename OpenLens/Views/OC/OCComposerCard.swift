@@ -215,51 +215,121 @@ struct OCComposerSendLabel: View {
     }
 }
 
-/// Line comments from the Changes tab, waiting in the composer as chips (the web's comment
-/// chip): file name and lines, the comment text, and a button to drop it. They are folded into
-/// the next prompt as the web's "The user made the following comment regarding …" sentences.
+/// Line comments from the Changes tab and quotes from the Terminal, waiting in the composer as
+/// chips (the web's comment and quote cards), each with a button to drop it. They are folded into
+/// the next prompt: quotes first as "From the terminal:" blocks, the comments as the web's
+/// "The user made the following comment regarding …" sentences.
 struct OCComposerCommentChips: View {
     let sessionID: String?
     private let store = OCDiffCommentStore.shared
+    /// The quote whose optional comment is being written (the web's quote comment editor).
+    @State private var commenting: OCDiffComment?
+    @State private var draft = ""
 
     var body: some View {
         let items = store.comments(sessionID: sessionID)
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(items) { comment in
-                    HStack(alignment: .top, spacing: 8) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(comment.text)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(Color.appPrimary)
-                                .lineLimit(3)
-                            HStack(spacing: 5) {
-                                OCFileTypeIcon(name: (comment.file as NSString).lastPathComponent)
-                                Text(AppText.ocLineCommentChipLocation(file: comment.file, start: comment.startLine, end: comment.endLine))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Color.appSecondary)
-                                    .lineLimit(1)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                        Button { store.remove(comment.id) } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundStyle(Color.appSecondary)
-                                .frame(width: 24, height: 24)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("oc.composer.comment.remove")
-                        .accessibilityLabel(AppText.ocLineCommentRemove)
+                    if let quote = comment.quote {
+                        quoteChip(comment, quote: quote)
+                    } else {
+                        commentChip(comment)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.appTertiary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("oc.composer.comment")
+                }
+            }
+            .alert(AppText.ocTerminalQuoteCommentTitle, isPresented: Binding(
+                get: { commenting != nil }, set: { if !$0 { commenting = nil } }
+            )) {
+                TextField(AppText.ocTerminalQuoteCommentPlaceholder, text: $draft)
+                    .accessibilityIdentifier("oc.composer.quote.commentField")
+                Button(AppText.ocLineCommentCancel, role: .cancel) { commenting = nil }
+                Button(AppText.ocLineCommentSave) {
+                    if let commenting { store.setQuoteComment(commenting.id, text: draft) }
+                    commenting = nil
                 }
             }
         }
+    }
+
+    private func commentChip(_ comment: OCDiffComment) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(comment.text)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.appPrimary)
+                    .lineLimit(3)
+                HStack(spacing: 5) {
+                    OCFileTypeIcon(name: (comment.file as NSString).lastPathComponent)
+                    Text(AppText.ocLineCommentChipLocation(file: comment.file, start: comment.startLine, end: comment.endLine))
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.appSecondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            removeButton(comment, id: "oc.composer.comment.remove", label: AppText.ocLineCommentRemove)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.appTertiary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("oc.composer.comment")
+    }
+
+    /// The web's quote card: the quoted text on one line, then the source ("Terminal" with its
+    /// icon); a tap adds or edits the optional comment.
+    private func quoteChip(_ comment: OCDiffComment, quote: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button {
+                draft = comment.text
+                commenting = comment
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(quote.replacingOccurrences(of: "\n", with: " "))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.appPrimary)
+                        .lineLimit(1)
+                    if !comment.text.isEmpty {
+                        Text(comment.text)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.appPrimary)
+                            .lineLimit(2)
+                    }
+                    HStack(spacing: 5) {
+                        Image(systemName: "apple.terminal")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color.appSecondary)
+                        Text(AppText.ocTerminalQuoteLabel)
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color.appSecondary)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.composer.quote.open")
+            removeButton(comment, id: "oc.composer.quote.remove", label: AppText.ocTerminalQuoteRemove)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.appTertiary.opacity(0.7), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("oc.composer.quote")
+    }
+
+    private func removeButton(_ comment: OCDiffComment, id: String, label: String) -> some View {
+        Button { store.remove(comment.id) } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(Color.appSecondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
+        .accessibilityLabel(label)
     }
 }

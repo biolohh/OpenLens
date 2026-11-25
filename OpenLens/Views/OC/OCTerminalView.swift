@@ -8,6 +8,10 @@ struct OCTerminalView: View {
     let store: OCTerminalStore
 
     @Environment(\.connection) private var connection
+    /// The web seeds a terminal on an empty session only in its mobile placement; a regular-width
+    /// layout behaves like the desktop panel and waits for `+`.
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         VStack(spacing: 0) {
@@ -21,8 +25,17 @@ struct OCTerminalView: View {
         .task(id: store.sessionID) {
             await store.appear(
                 apiClient: connection.client,
-                isV2: connection.serverCapabilities?.protocolVersion == .v2
+                isV2: connection.serverCapabilities?.protocolVersion == .v2,
+                seedsEmpty: sizeClass != .regular
             )
+        }
+        // Returning from the background reattaches (snapshot + replay) and re-reads the list.
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background: store.background()
+            case .active: Task { await store.foreground(apiClient: connection.client) }
+            default: break
+            }
         }
         .alert(
             store.actionError ?? "",
@@ -52,7 +65,7 @@ struct OCTerminalView: View {
                 .buttonStyle(.plain)
                 .disabled(store.creating || store.phase != .ready)
                 .accessibilityIdentifier("oc.terminal.new")
-                .accessibilityLabel(OCTerminalText.newTerminal)
+                .accessibilityLabel(AppText.ocTerminalNew)
             }
             .padding(.horizontal, 12)
         }
@@ -88,7 +101,7 @@ struct OCTerminalView: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("oc.terminal.close")
-            .accessibilityLabel(OCTerminalText.close)
+            .accessibilityLabel(AppText.ocTerminalClose)
             .accessibilityValue(store.createdIDs.contains(info.id) ? "new" : "")
         }
         .padding(.leading, 8)
@@ -107,7 +120,7 @@ struct OCTerminalView: View {
     private var content: some View {
         switch store.phase {
         case .idle, .loading:
-            message(OCTerminalText.loading)
+            message(AppText.ocTerminalLoading)
         case .unavailable(let text):
             message(text)
         case .failed(let text):
@@ -115,17 +128,17 @@ struct OCTerminalView: View {
                 Text(text)
                     .font(.system(size: 14))
                     .foregroundStyle(Color.appSecondary)
-                Button(OCTerminalText.retry) { Task { await store.reload() } }
+                Button(AppText.ocTerminalRetry) { Task { await store.reload() } }
                     .font(.system(size: 13, weight: .medium))
                     .accessibilityIdentifier("oc.terminal.retry")
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         case .ready:
             if let terminal = store.connection {
-                OCTerminalSurface(connection: terminal)
+                OCTerminalSurface(connection: terminal, sessionID: store.sessionID)
                     .id(terminal.ptyID)
             } else if store.creating {
-                message(OCTerminalText.loading)
+                message(AppText.ocTerminalLoading)
             } else {
                 Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -149,8 +162,10 @@ struct OCTerminalView: View {
 /// keyboard).
 private struct OCTerminalSurface: View {
     let connection: OCTerminalConnection
+    let sessionID: String
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.ocPanelBackground) private var panelBackground
     @State private var keyboardFocused = false
     @State private var controlArmed = false
     /// The view follows new output; a user scroll away from the bottom pauses it until they
@@ -158,12 +173,21 @@ private struct OCTerminalSurface: View {
     @State private var followsOutput = true
     /// The last scroll position is at (or within a row of) the bottom.
     @State private var atBottom = true
+    /// Long-press and drag select cells; the edit menu then offers Copy, Quote and Select All.
+    @State private var selection: OCTerminalSelection?
+    /// Where the edit menu points (in the viewport), set when a selection gesture ends.
+    @State private var menuRequest: OCTerminalMenuRequest?
+    @State private var quotedNotice = false
+
+    private static let viewport = "oc.terminal.viewport"
 
     private static let fontSize: CGFloat = 13
     private static let horizontalPadding: CGFloat = 12
     private static let verticalPadding: CGFloat = 8
 
     private var metrics: OCTerminalMetrics { OCTerminalMetrics.current(size: Self.fontSize) }
+    /// The panel the terminal sits on is its default background (the web's `bg-base`).
+    private var terminalBackground: Color { panelBackground ?? Color.appBackground }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -176,7 +200,7 @@ private struct OCTerminalSurface: View {
                             .foregroundStyle(Color.appDanger)
                         Spacer(minLength: 0)
                         if case .failed = connection.status {
-                            Button(OCTerminalText.reconnect) { connection.reconnect() }
+                            Button(AppText.ocTerminalReconnect) { connection.reconnect() }
                                 .font(.system(size: 12, weight: .medium))
                                 .accessibilityIdentifier("oc.terminal.reconnect")
                         }
@@ -218,7 +242,7 @@ private struct OCTerminalSurface: View {
     private var banner: String? {
         switch connection.status {
         case .failed(let text): text
-        case .exited: OCTerminalText.exited
+        case .exited: AppText.ocTerminalExited
         default: nil
         }
     }
@@ -229,10 +253,18 @@ private struct OCTerminalSurface: View {
                 ScrollView(.vertical) {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(connection.lines) { line in
-                            OCTerminalRow(line: line, metrics: metrics, dark: colorScheme == .dark)
-                                .id(line.id)
+                            OCTerminalRow(
+                                line: line, metrics: metrics, background: terminalBackground,
+                                selected: selection?.columns(line: line.id),
+                                selectionColor: OCTerminalPalette.selection(dark: colorScheme == .dark)
+                            )
+                            .id(line.id)
                         }
                     }
+                    // Rows are exactly one cell tall, so a point maps to a line and column directly.
+                    .gesture(OCTerminalSelectGesture(viewport: Self.viewport) { phase, point, viewportPoint in
+                        select(phase, at: point, viewportPoint: viewportPoint)
+                    })
                     .padding(.horizontal, Self.horizontalPadding)
                     .padding(.vertical, Self.verticalPadding)
                     // At least the pane's height, so the part of a row left over goes below the
@@ -251,22 +283,133 @@ private struct OCTerminalSurface: View {
                     // Only the user's own scrolling decides; content growth alone never unpins.
                     if phase == .interacting {
                         followsOutput = false
+                        menuRequest = nil
                     } else if phase == .idle, old == .interacting || old == .decelerating {
                         followsOutput = atBottom
                     }
                 }
                 .onChange(of: connection.revision) { _, _ in
+                    // A selection whose first line left the history (or a redraw) is dropped.
+                    if let selection, let first = connection.lines.first?.id, selection.start.line < first {
+                        self.selection = nil
+                        menuRequest = nil
+                    }
                     // New output keeps the screen in view, unless the user is reading back.
-                    guard followsOutput, let last = connection.lines.last?.id else { return }
+                    guard followsOutput, selection == nil, let last = connection.lines.last?.id else { return }
                     reader.scrollTo(last, anchor: .bottom)
                 }
             }
             .contentShape(Rectangle())
-            .onTapGesture { keyboardFocused = true }
+            .onTapGesture {
+                // A tap ends a selection first; otherwise it brings up the keyboard.
+                if selection != nil {
+                    selection = nil
+                    menuRequest = nil
+                } else {
+                    keyboardFocused = true
+                }
+            }
+            .background(
+                OCTerminalEditMenu(
+                    request: $menuRequest,
+                    quoteAllowed: { quoteAllowed },
+                    perform: perform
+                )
+            )
+            .overlay(alignment: .top) {
+                if quotedNotice {
+                    Text(AppText.ocTerminalQuoted)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.appPrimary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color.appTertiary, in: Capsule())
+                        .padding(.top, 8)
+                        .accessibilityIdentifier("oc.terminal.quoted")
+                        .transition(.opacity)
+                }
+            }
+            .coordinateSpace(.named(Self.viewport))
             .onAppear { report(proxy.size) }
             .onChange(of: proxy.size) { _, size in report(size) }
         }
         .accessibilityIdentifier("oc.terminal.screen")
+    }
+
+    // MARK: Selection
+
+    /// The cell under a point of the rows (content coordinates).
+    private func point(at location: CGPoint) -> OCTerminalPoint? {
+        let lines = connection.lines
+        guard !lines.isEmpty else { return nil }
+        let row = min(max(0, Int(floor(location.y / metrics.lineHeight))), lines.count - 1)
+        let column = max(0, Int(floor(location.x / metrics.cellWidth)))
+        let line = lines[row]
+        return OCTerminalPoint(line: line.id, column: line.cellStart(column))
+    }
+
+    private func select(_ phase: OCTerminalSelectGesture.Phase, at location: CGPoint, viewportPoint: CGPoint) {
+        switch phase {
+        case .began:
+            guard let point = point(at: location) else { return }
+            menuRequest = nil
+            // The keyboard stays: hiding it resizes the terminal, and the server's redraw would
+            // replace the lines the selection points at.
+            // A long press takes the word under the finger, like text elsewhere on iOS.
+            let line = connection.lines.first { $0.id == point.line }
+            if let word = line?.word(at: point.column) {
+                selection = OCTerminalSelection(
+                    anchor: OCTerminalPoint(line: point.line, column: word.lowerBound),
+                    head: OCTerminalPoint(line: point.line, column: word.upperBound)
+                )
+            } else {
+                selection = OCTerminalSelection(anchor: point, head: point)
+            }
+            UISelectionFeedbackGenerator().selectionChanged()
+        case .changed:
+            guard var current = selection, let point = point(at: location) else { return }
+            current.head = point
+            selection = current
+        case .ended:
+            guard selection != nil else { return }
+            menuRequest = OCTerminalMenuRequest(point: viewportPoint)
+        case .cancelled:
+            break
+        }
+    }
+
+    private var selectedText: String {
+        selection?.text(in: connection.lines) ?? ""
+    }
+
+    private var quoteAllowed: Bool {
+        OCTerminalSelection.quoteText(selectedText).count <= OCTerminalSelection.quoteLimit
+    }
+
+    private func perform(_ action: OCTerminalEditMenu.Action) {
+        switch action {
+        case .copy:
+            let text = selectedText
+            if !text.isEmpty { UIPasteboard.general.string = text }
+            selection = nil
+        case .quote:
+            let text = OCTerminalSelection.quoteText(selectedText)
+            guard !text.isEmpty, text.count <= OCTerminalSelection.quoteLimit else { return }
+            OCDiffCommentStore.shared.addQuote(sessionID: sessionID, text: text)
+            selection = nil
+            withAnimation { quotedNotice = true }
+            Task {
+                try? await Task.sleep(for: .seconds(2))
+                withAnimation { quotedNotice = false }
+            }
+        case .selectAll:
+            selection = OCTerminalSelection.all(connection.lines)
+            if let current = menuRequest?.point {
+                menuRequest = OCTerminalMenuRequest(point: current)
+            } else {
+                menuRequest = OCTerminalMenuRequest(point: CGPoint(x: 80, y: 40))
+            }
+        }
     }
 
     private func report(_ size: CGSize) {
@@ -284,7 +427,11 @@ private struct OCTerminalSurface: View {
 private struct OCTerminalRow: View, Equatable {
     let line: OCTerminalLine
     let metrics: OCTerminalMetrics
-    let dark: Bool
+    /// The terminal's default background (inverse cells without a colour take it as foreground).
+    let background: Color
+    /// Selected columns of this line (`OCTerminalSelection.lineEnd` = through the row's end).
+    var selected: ClosedRange<Int>? = nil
+    var selectionColor: Color = .clear
 
     var body: some View {
         Text(attributed)
@@ -292,6 +439,14 @@ private struct OCTerminalRow: View, Equatable {
             .fixedSize(horizontal: true, vertical: false)
             .frame(height: metrics.lineHeight, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .leading) {
+                if let selected {
+                    let columns = min(selected.upperBound, 4096) - selected.lowerBound + 1
+                    selectionColor
+                        .frame(width: CGFloat(columns) * metrics.cellWidth, height: metrics.lineHeight)
+                        .offset(x: CGFloat(selected.lowerBound) * metrics.cellWidth)
+                }
+            }
             .clipped()
             .accessibilityLabel(line.text.trimmingCharacters(in: .whitespaces))
             .accessibilityIdentifier("oc.terminal.line")
@@ -302,10 +457,10 @@ private struct OCTerminalRow: View, Equatable {
         for run in line.runs {
             var part = AttributedString(run.text)
             let style = run.style
-            var foreground = OCTerminalPalette.color(style.foreground, dark: dark) ?? Color.appPrimary
-            var background = OCTerminalPalette.color(style.background, dark: dark)
+            var foreground = OCTerminalPalette.color(style.foreground) ?? Color.appPrimary
+            var background = OCTerminalPalette.color(style.background)
             if style.inverse != style.cursor {
-                let swapped = background ?? Color.appBackground
+                let swapped = background ?? self.background
                 background = foreground
                 foreground = swapped
             }
@@ -357,64 +512,175 @@ struct OCTerminalMetrics: Equatable {
     }
 }
 
-/// The 16 ANSI colours and the xterm 256-colour table. Red, green and yellow are the theme's
-/// danger / success / warning colours; the rest are fixed terminal colours with a darker light-mode
-/// variant so they stay readable on both backgrounds.
-enum OCTerminalPalette {
-    private static let named: [(light: UIColor, dark: UIColor)] = [
-        (rgb(23, 23, 23), rgb(60, 60, 60)), // black
-        (rgb(220, 60, 40), rgb(252, 83, 58)), // red
-        (rgb(10, 140, 0), rgb(18, 201, 5)), // green
-        (rgb(160, 118, 0), rgb(252, 213, 58)), // yellow
-        (rgb(30, 90, 200), rgb(80, 150, 255)), // blue
-        (rgb(170, 40, 170), rgb(220, 110, 220)), // magenta
-        (rgb(0, 130, 150), rgb(60, 200, 215)), // cyan
-        (rgb(110, 110, 110), rgb(200, 200, 200)), // white
-        (rgb(90, 90, 90), rgb(110, 110, 110)), // bright black
-        (rgb(235, 80, 60), rgb(255, 120, 100)), // bright red
-        (rgb(20, 160, 20), rgb(90, 230, 80)), // bright green
-        (rgb(180, 140, 0), rgb(255, 230, 110)), // bright yellow
-        (rgb(50, 110, 230), rgb(120, 180, 255)), // bright blue
-        (rgb(190, 60, 190), rgb(240, 140, 240)), // bright magenta
-        (rgb(0, 150, 170), rgb(110, 225, 235)), // bright cyan
-        (rgb(60, 60, 60), rgb(240, 240, 240)), // bright white
+/// One fixed colour table for both appearances, as the web's emulator (ghostty-web's default theme:
+/// the 16 ANSI colours, then the xterm 6×6×6 cube and 24 greys). Only the default background,
+/// foreground, cursor and selection follow the theme.
+nonisolated enum OCTerminalPalette {
+    struct RGB: Equatable, Sendable {
+        let red: UInt8
+        let green: UInt8
+        let blue: UInt8
+        init(_ red: UInt8, _ green: UInt8, _ blue: UInt8) {
+            self.red = red
+            self.green = green
+            self.blue = blue
+        }
+    }
+
+    static let ansi: [RGB] = [
+        RGB(0x00, 0x00, 0x00), RGB(0xcd, 0x31, 0x31), RGB(0x0d, 0xbc, 0x79), RGB(0xe5, 0xe5, 0x10),
+        RGB(0x24, 0x72, 0xc8), RGB(0xbc, 0x3f, 0xbc), RGB(0x11, 0xa8, 0xcd), RGB(0xe5, 0xe5, 0xe5),
+        RGB(0x66, 0x66, 0x66), RGB(0xf1, 0x4c, 0x4c), RGB(0x23, 0xd1, 0x8b), RGB(0xf5, 0xf5, 0x43),
+        RGB(0x3b, 0x8e, 0xea), RGB(0xd6, 0x70, 0xd6), RGB(0x29, 0xb8, 0xdb), RGB(0xff, 0xff, 0xff),
     ]
 
-    private static func rgb(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> UIColor {
-        UIColor(red: red / 255, green: green / 255, blue: blue / 255, alpha: 1)
-    }
-
-    static func color(_ color: OCTerminalColor?, dark: Bool) -> Color? {
-        guard let color else { return nil }
+    /// The table entry for a cell colour (0–255 or true colour).
+    static func rgb(_ color: OCTerminalColor) -> RGB {
         switch color {
         case .ansi(let n):
-            switch n {
-            case 1: return .appDanger
-            case 2: return .appSuccess
-            case 3: return .appWarning
-            default:
-                let pair = named[min(max(0, n), 15)]
-                return Color(uiColor: dark ? pair.dark : pair.light)
-            }
+            return ansi[min(max(0, n), 15)]
         case .indexed(let n):
-            return Color(uiColor: indexed(n))
+            let n = min(max(0, n), 255)
+            if n < 16 { return ansi[n] }
+            if n >= 232 {
+                let level = UInt8(8 + (n - 232) * 10)
+                return RGB(level, level, level)
+            }
+            let steps: [UInt8] = [0, 95, 135, 175, 215, 255]
+            let value = n - 16
+            return RGB(steps[(value / 36) % 6], steps[(value / 6) % 6], steps[value % 6])
         case .rgb(let r, let g, let b):
-            return Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
+            return RGB(r, g, b)
         }
     }
 
-    private static func indexed(_ n: Int) -> UIColor {
-        if n >= 232 {
-            let level = CGFloat(8 + (n - 232) * 10)
-            return rgb(level, level, level)
-        }
-        let value = n - 16
-        let steps: [CGFloat] = [0, 95, 135, 175, 215, 255]
-        let red: CGFloat = steps[(value / 36) % 6]
-        let green: CGFloat = steps[(value / 6) % 6]
-        let blue: CGFloat = steps[value % 6]
-        return rgb(red, green, blue)
+    static func color(_ color: OCTerminalColor?) -> Color? {
+        guard let color else { return nil }
+        let value = rgb(color)
+        return Color(red: Double(value.red) / 255, green: Double(value.green) / 255, blue: Double(value.blue) / 255)
     }
+
+    /// The web's selection: the foreground at 20 % (light) / 25 % (dark).
+    static func selection(dark: Bool) -> Color {
+        Color.appPrimary.opacity(dark ? 0.25 : 0.2)
+    }
+}
+
+// MARK: - Selection gesture and edit menu
+
+/// Long press, then drag: the terminal's text selection. A UIKit recognizer, so a plain drag still
+/// scrolls the history and the press reports the finger while it moves after recognising.
+private struct OCTerminalSelectGesture: UIGestureRecognizerRepresentable {
+    enum Phase { case began, changed, ended, cancelled }
+
+    let viewport: String
+    /// The point in the rows' coordinates and in the viewport (for the menu).
+    let onChange: (Phase, CGPoint, CGPoint) -> Void
+
+    func makeUIGestureRecognizer(context: Context) -> UILongPressGestureRecognizer {
+        let recognizer = UILongPressGestureRecognizer()
+        recognizer.minimumPressDuration = 0.35
+        return recognizer
+    }
+
+    func handleUIGestureRecognizerAction(_ recognizer: UILongPressGestureRecognizer, context: Context) {
+        let phase: Phase
+        switch recognizer.state {
+        case .began: phase = .began
+        case .changed: phase = .changed
+        case .ended: phase = .ended
+        case .cancelled, .failed: phase = .cancelled
+        default: return
+        }
+        onChange(phase, context.converter.localLocation, context.converter.location(in: .named(viewport)))
+    }
+}
+
+/// A request to show the edit menu at a point of the viewport; a new value shows it again.
+struct OCTerminalMenuRequest: Equatable {
+    let id = UUID()
+    let point: CGPoint
+}
+
+/// The system edit menu over the terminal (Copy, Quote, Select All), presented by a
+/// `UIEditMenuInteraction` on a view behind the screen that never takes touches itself.
+private struct OCTerminalEditMenu: UIViewRepresentable {
+    enum Action { case copy, quote, selectAll }
+
+    @Binding var request: OCTerminalMenuRequest?
+    /// Read when the menu opens (the selection's text is built only then, not on every update).
+    let quoteAllowed: () -> Bool
+    let perform: (Action) -> Void
+
+    func makeUIView(context: Context) -> OCTerminalMenuHostView {
+        let view = OCTerminalMenuHostView()
+        let interaction = UIEditMenuInteraction(delegate: context.coordinator)
+        view.addInteraction(interaction)
+        context.coordinator.interaction = interaction
+        return view
+    }
+
+    func updateUIView(_ view: OCTerminalMenuHostView, context: Context) {
+        context.coordinator.parent = self
+        guard let request else {
+            if context.coordinator.shown != nil {
+                context.coordinator.shown = nil
+                context.coordinator.interaction?.dismissMenu()
+            }
+            return
+        }
+        guard context.coordinator.shown != request.id else { return }
+        context.coordinator.shown = request.id
+        let configuration = UIEditMenuConfiguration(identifier: nil, sourcePoint: request.point)
+        DispatchQueue.main.async {
+            context.coordinator.interaction?.presentEditMenu(with: configuration)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    final class Coordinator: NSObject, UIEditMenuInteractionDelegate {
+        var parent: OCTerminalEditMenu
+        weak var interaction: UIEditMenuInteraction?
+        var shown: UUID?
+
+        init(parent: OCTerminalEditMenu) {
+            self.parent = parent
+        }
+
+        func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, menuFor configuration: UIEditMenuConfiguration,
+            suggestedActions: [UIMenuElement]
+        ) -> UIMenu? {
+            let perform = parent.perform
+            var actions: [UIMenuElement] = [
+                UIAction(title: AppText.ocTerminalCopy) { _ in perform(.copy) },
+            ]
+            if parent.quoteAllowed() {
+                actions.append(UIAction(title: AppText.ocTerminalQuote, image: UIImage(systemName: "quote.opening")) { _ in perform(.quote) })
+            } else {
+                actions.append(UIAction(title: AppText.ocTerminalQuoteTooLong, attributes: .disabled) { _ in })
+            }
+            actions.append(UIAction(title: AppText.ocTerminalSelectAll) { _ in perform(.selectAll) })
+            return UIMenu(children: actions)
+        }
+
+        func editMenuInteraction(
+            _ interaction: UIEditMenuInteraction, willDismissMenuFor configuration: UIEditMenuConfiguration,
+            animator: any UIEditMenuInteractionAnimating
+        ) {
+            animator.addCompletion { [weak self] in
+                guard let self, self.shown != nil else { return }
+                self.shown = nil
+                self.parent.request = nil
+            }
+        }
+    }
+}
+
+/// Hosts the edit menu; hit testing passes through to the screen.
+final class OCTerminalMenuHostView: UIView {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? { nil }
 }
 
 // MARK: - Keys
@@ -483,7 +749,7 @@ private struct OCTerminalKeyBar: View {
             }
             .buttonStyle(.plain)
             .accessibilityIdentifier("oc.terminal.key.keyboard")
-            .accessibilityLabel(OCTerminalText.keyboard)
+            .accessibilityLabel(AppText.ocTerminalKeyboard)
         }
         .padding(.horizontal, 8)
         .frame(height: 40)

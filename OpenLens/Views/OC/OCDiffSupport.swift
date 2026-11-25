@@ -147,6 +147,26 @@ nonisolated struct OCDiffComment: Identifiable, Equatable, Sendable {
     var text: String
     let preview: String
     var side: OCDiffSide = .additions
+    /// Set for text quoted from the terminal (the web's `quote` context item); `text` is then the
+    /// optional comment, `file` and the lines are unused.
+    var quote: String? = nil
+
+    /// A terminal selection waiting in the composer (the web's Quote button on a terminal).
+    static func terminalQuote(sessionID: String, text: String) -> OCDiffComment {
+        OCDiffComment(
+            id: UUID(), sessionID: sessionID, file: "", startLine: 0, endLine: 0, text: "", preview: text, quote: text
+        )
+    }
+
+    /// The quote as the model receives it, word for word the web's `formatQuoteComment`: every
+    /// quoted line prefixed, so quoted text can't read as the user's own words.
+    var quoteBlock: String? {
+        guard let quote else { return nil }
+        let comment = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (["From the terminal:"]
+            + quote.components(separatedBy: "\n").map { $0.isEmpty ? ">" : "> " + $0 }
+            + (comment.isEmpty ? [] : ["", comment])).joined(separator: "\n")
+    }
 
     /// The sentence the model receives, word for word the web's `formatCommentNote`.
     var note: String {
@@ -168,7 +188,22 @@ final class OCDiffCommentStore {
     }
 
     func comments(sessionID: String?, file: String) -> [OCDiffComment] {
-        comments(sessionID: sessionID).filter { $0.file == file }
+        comments(sessionID: sessionID).filter { $0.quote == nil && $0.file == file }
+    }
+
+    /// Quotes terminal text into the session's composer; empty text adds nothing.
+    @discardableResult
+    func addQuote(sessionID: String, text: String) -> OCDiffComment? {
+        guard !text.isEmpty else { return nil }
+        let quote = OCDiffComment.terminalQuote(sessionID: sessionID, text: text)
+        all.append(quote)
+        return quote
+    }
+
+    /// The comment on a quote (blank removes it); line comments keep their non-empty rule.
+    func setQuoteComment(_ id: UUID, text: String) {
+        guard let index = all.firstIndex(where: { $0.id == id }), all[index].quote != nil else { return }
+        all[index].text = text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     @discardableResult
@@ -211,11 +246,13 @@ final class OCDiffCommentStore {
         return !known.contains(word)
     }
 
-    /// The prompt as sent, like the web's request builder: the typed text first, then the comment
-    /// sentences, one per line.
+    /// The prompt as sent, like the web's request builder: quotes lead (like an email reply), then
+    /// a blank line and the typed text with the comment sentences, one per line.
     nonisolated static func composedPrompt(comments: [OCDiffComment], typed: String) -> String {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ([text] + comments.map(\.note)).filter { !$0.isEmpty }.joined(separator: "\n")
+        let quotes = comments.compactMap(\.quoteBlock)
+        let body = ([text] + comments.filter { $0.quote == nil }.map(\.note)).filter { !$0.isEmpty }.joined(separator: "\n")
+        return (quotes + [body]).filter { !$0.isEmpty }.joined(separator: "\n\n")
     }
 }
 
