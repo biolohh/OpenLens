@@ -35,8 +35,8 @@ nonisolated struct OCTerminalEvent: Equatable, Sendable {
     /// (the web's model does the same on `server.connected`).
     static let resyncNotification = Notification.Name("OpenLens.terminalListResync")
 
-    static func postResync() {
-        NotificationCenter.default.post(name: resyncNotification, object: nil)
+    static func postResync(to center: NotificationCenter = .default) {
+        center.post(name: resyncNotification, object: nil)
     }
 
     init(kind: Kind, sessionID: String, ptyID: String?, terminal: OCTerminalInfo?) {
@@ -65,8 +65,8 @@ nonisolated struct OCTerminalEvent: Equatable, Sendable {
     }
 
     /// Hands the event to the open Terminal tabs (any thread; they read it on the main queue).
-    static func post(_ event: OCTerminalEvent) {
-        NotificationCenter.default.post(name: notification, object: nil, userInfo: ["event": event])
+    static func post(_ event: OCTerminalEvent, to center: NotificationCenter = .default) {
+        center.post(name: notification, object: nil, userInfo: ["event": event])
     }
 }
 

@@ -385,11 +385,13 @@ struct OCTerminalSyncTests {
     @Test func notificationIsPostedForTerminalEvents() throws {
         nonisolated final class Box: @unchecked Sendable { var events: [OCTerminalEvent] = [] }
         let box = Box()
-        let token = NotificationCenter.default.addObserver(forName: OCTerminalEvent.notification, object: nil, queue: nil) { note in
-            if let event = note.userInfo?["event"] as? OCTerminalEvent, event.sessionID == "ses_note" { box.events.append(event) }
+        let center = NotificationCenter()
+        let token = center.addObserver(forName: OCTerminalEvent.notification, object: nil, queue: nil) { note in
+            if let event = note.userInfo?["event"] as? OCTerminalEvent { box.events.append(event) }
         }
-        defer { NotificationCenter.default.removeObserver(token) }
+        defer { center.removeObserver(token) }
         var adapter = V2EventAdapter()
+        adapter.terminalEvents = center
         _ = try adapter.event(["type": "persistent-pty.added", "data": [
             "sessionID": "ses_note", "terminal": ["id": "pty_9", "title": "Terminal 1"],
         ]], directory: "/home/docker")
@@ -404,18 +406,24 @@ struct OCTerminalSyncTests {
         }
     }
 
-    /// The web re-lists terminals on every `server.connected` (first connection and reconnects).
+    /// The web re-lists terminals on every `server.connected` (first connection and reconnects);
+    /// a heartbeat asks for nothing. A private center, so other tests can't add posts.
     @Test func streamConnectAsksTheTerminalListsToResync() throws {
         nonisolated final class Box: @unchecked Sendable { var count = 0 }
         let box = Box()
-        let token = NotificationCenter.default.addObserver(forName: OCTerminalEvent.resyncNotification, object: nil, queue: nil) { _ in
+        let center = NotificationCenter()
+        let token = center.addObserver(forName: OCTerminalEvent.resyncNotification, object: nil, queue: nil) { _ in
             box.count += 1
         }
-        defer { NotificationCenter.default.removeObserver(token) }
+        defer { center.removeObserver(token) }
         var adapter = V2EventAdapter()
-        #expect(try adapter.event(["type": "server.connected", "data": [String: Any]()], directory: "/home/docker") != nil)
+        adapter.terminalEvents = center
         _ = try adapter.event(["type": "server.heartbeat", "data": [String: Any]()], directory: "/home/docker")
-        #expect(box.count >= 1)
+        #expect(box.count == 0)
+        #expect(try adapter.event(["type": "server.connected", "data": [String: Any]()], directory: "/home/docker") != nil)
+        #expect(box.count == 1)
+        _ = try adapter.event(["type": "server.heartbeat", "data": [String: Any]()], directory: "/home/docker")
+        #expect(box.count == 1)
     }
 
     /// The edge fixed when the drag begins stays through every move, also after the handles swap.

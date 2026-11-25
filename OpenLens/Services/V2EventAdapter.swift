@@ -4,6 +4,8 @@ import Foundation
 /// reducers. Owned by SSEClient's serial queue; reset on every stream change.
 nonisolated struct V2EventAdapter {
     private var tools: [String: [String: Any]] = [:]
+    /// Where terminal list events go (tests pass their own center).
+    var terminalEvents: NotificationCenter = .default
     private static let maximumTools = 256
     /// Emitted when a session's pending inbox changed but its transcript did not.
     static let inboxChangedEventType = "session.inbox.changed"
@@ -24,7 +26,7 @@ nonisolated struct V2EventAdapter {
         }
         // Terminal lists may have changed while the stream was down: the Terminal tabs re-read
         // them (the web's terminal model re-lists on every `server.connected`).
-        if type == "server.connected" { OCTerminalEvent.postResync() }
+        if type == "server.connected" { OCTerminalEvent.postResync(to: terminalEvents) }
         if type == "server.connected" || type == "server.heartbeat" {
             return OCEvent(type: type, properties: AnyCodable([String: String]()))
         }
@@ -44,7 +46,7 @@ nonisolated struct V2EventAdapter {
         // go to the session's Terminal tab (OCTerminalStore), never to the chat reducers, so they
         // neither pass the directory filter nor count as an undecodable event.
         if type.hasPrefix("persistent-pty.") {
-            if let event = OCTerminalEvent(type: type, data: data) { OCTerminalEvent.post(event) }
+            if let event = OCTerminalEvent(type: type, data: data) { OCTerminalEvent.post(event, to: terminalEvents) }
             return nil
         }
         if let directory {
