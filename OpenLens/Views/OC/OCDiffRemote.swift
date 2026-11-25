@@ -47,8 +47,8 @@ nonisolated enum OCVCSRemote {
     /// `GET /api/fs/read/<path>`: the raw bytes of one file (images, audio), built like the client's own.
     static func fileRequest(baseURL: URL, authHeader: String?, directory: String, path: String) -> URLRequest {
         var url = baseURL.appending(path: "api/fs/read")
-        let segments = path.split(separator: "/", omittingEmptySubsequences: true)
-            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+        // `append(path:)` encodes the characters a path cannot carry; pre-encoding would double-encode "%".
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
         url.append(path: segments.joined(separator: "/"))
         if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             components.queryItems = [URLQueryItem(name: "location[directory]", value: directory)]

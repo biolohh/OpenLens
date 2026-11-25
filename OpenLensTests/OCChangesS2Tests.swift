@@ -480,9 +480,9 @@ struct OCChangesS2Tests {
         ]
         let removed = try #require(OCDiffSelection.toggled(nil, file: "a", row: 0, lines: rows))
         #expect(removed.side == .deletions && removed.startLine == 12 && removed.endLine == 12)
-        // A range ending on an added row counts that side only.
+        // A range ending on an added row counts that side's rows only (12 and 13, not the removed 12).
         let range = try #require(OCDiffSelection.toggled(removed, file: "a", row: 2, lines: rows))
-        #expect(range.side == .additions && range.startLine == 13 && range.endLine == 13)
+        #expect(range.side == .additions && range.startLine == 12 && range.endLine == 13)
         let store = OCDiffCommentStore()
         let saved = try #require(store.add(sessionID: "s", file: "a", selection: removed, text: "x"))
         #expect(saved.side == .deletions)
