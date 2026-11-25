@@ -574,8 +574,12 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal").firstMatch
             .waitForExistence(timeout: 8), "Terminal view missing")
         XCTAssertTrue(app.buttons["oc.terminal.tab"].firstMatch.waitForExistence(timeout: 15), "No terminal tab")
-        // Whatever happens below, close what this run created; terminals that already existed stay.
-        defer { closeOwnTerminals(in: app) }
+        // Whatever happens below, close what this run created (terminals that already existed
+        // stay) and drop any quote this run put into the composer: nothing is ever sent.
+        defer {
+            closeOwnTerminals(in: app)
+            removeQuoteChips(in: app)
+        }
         // Type only into a terminal this run created: a terminal that already existed may be
         // someone's, in another folder or inside a program. If the app reused one, open a new one.
         let ownSelected = app.buttons.matching(NSPredicate(
@@ -605,6 +609,11 @@ final class OpenLensSmokeTests: XCTestCase {
         app.typeText("ls\n")
         sleep(2)
         snapshot("03-chat-terminal-ls")
+        app.typeText("printf '\\033[31mred \\033[32mgreen \\033[33myellow \\033[34mblue \\033[35mmagenta \\033[36mcyan \\033[90mgray \\033[38;5;208morange\\033[0m\\n'\n")
+        sleep(2)
+        snapshot("03-chat-terminal-palette")
+        walkTerminalSelection(in: app, output: output)
+        walkTerminalFullScreen(in: app, screen: screen)
         XCTAssertTrue(app.buttons["oc.terminal.key.esc"].exists, "Key bar missing")
         XCTAssertTrue(app.buttons["oc.terminal.key.ctrl"].exists, "Key bar Ctrl missing")
         // Hide the keyboard, so the tab row is free.
@@ -620,6 +629,76 @@ final class OpenLensSmokeTests: XCTestCase {
         entry.tap()
         XCTAssertTrue(app.staticTexts["openlens-smoke"].firstMatch.waitForExistence(timeout: 8),
                       "Terminal output lost after switching tabs")
+    }
+
+    /// Long-press selects the output line: the edit menu offers Copy (tapped), then a second
+    /// selection is quoted into the composer, checked on the Session tab and removed again.
+    private func walkTerminalSelection(in app: XCUIApplication, output: XCUIElement) {
+        func menuItem(_ title: String) -> XCUIElement {
+            app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
+        }
+        output.press(forDuration: 1.0)
+        let copy = menuItem("Copy")
+        XCTAssertTrue(copy.waitForExistence(timeout: 5), "Long press on terminal output did not show the edit menu")
+        XCTAssertTrue(menuItem("Quote").exists, "Edit menu lacks Quote")
+        snapshot("03-chat-terminal-selection")
+        if copy.exists { copy.tap() }
+        sleep(1)
+
+        output.press(forDuration: 1.0)
+        let quote = menuItem("Quote")
+        XCTAssertTrue(quote.waitForExistence(timeout: 5), "Second selection showed no Quote")
+        guard quote.exists else { return }
+        quote.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.terminal.quoted").firstMatch
+            .waitForExistence(timeout: 3), "Quote gave no confirmation")
+        app.buttons["oc.tab.session"].tap()
+        let chip = app.descendants(matching: .any).matching(identifier: "oc.composer.quote").firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 5), "Quoted terminal text is not in the composer")
+        snapshot("03-chat-terminal-quote-chip")
+        removeQuoteChips(in: app)
+        XCTAssertFalse(chip.exists, "Quote chip still in the composer")
+        app.buttons["oc.tab.more"].tap()
+        let entry = app.buttons["oc.more.terminal"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 5), "More sheet missing Terminal")
+        entry.tap()
+        XCTAssertTrue(app.staticTexts["openlens-smoke"].firstMatch.waitForExistence(timeout: 8),
+                      "Terminal output lost after quoting")
+    }
+
+    /// `less` on a text file and `top`, each quit with q: the alternate screen shows only the
+    /// program, and the prompt is back afterwards.
+    private func walkTerminalFullScreen(in app: XCUIApplication, screen: XCUIElement) {
+        screen.tap()
+        sleep(1)
+        app.typeText("less /etc/services\n")
+        let lessLine = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Network services'")).firstMatch
+        XCTAssertTrue(lessLine.waitForExistence(timeout: 8), "less did not show the file")
+        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'openlens-smoke'")).firstMatch
+        XCTAssertFalse(prompt.exists, "History still shows above the full-screen program")
+        snapshot("03-chat-terminal-less")
+        app.typeText("q")
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The shell did not come back after quitting less")
+        app.typeText("top\n")
+        let topLine = app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'top -' OR label BEGINSWITH 'Tasks:'")).firstMatch
+        XCTAssertTrue(topLine.waitForExistence(timeout: 8), "top did not draw")
+        sleep(2)
+        snapshot("03-chat-terminal-top")
+        app.typeText("q")
+        XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The shell did not come back after quitting top")
+    }
+
+    /// Drops every terminal quote from the composer (Session tab), so nothing quoted is ever sent.
+    private func removeQuoteChips(in app: XCUIApplication) {
+        let session = app.buttons["oc.tab.session"]
+        if session.exists { session.tap() }
+        let remove = app.buttons.matching(identifier: "oc.composer.quote.remove")
+        var count = 0
+        while remove.firstMatch.waitForExistence(timeout: 2), count < 4 {
+            remove.firstMatch.tap()
+            count += 1
+            sleep(1)
+        }
     }
 
     /// Closes the terminals this run created (value `new`), from wherever `walkTerminal` stopped.
