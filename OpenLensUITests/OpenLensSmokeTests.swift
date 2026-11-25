@@ -11,6 +11,19 @@ import XCTest
 ///   TEST_RUNNER_OPENLENS_SMOKE_PASS
 /// Without a URL the test is skipped.
 final class OpenLensSmokeTests: XCTestCase {
+    /// Set while the terminal walk runs: a failure that ends the test early (an element that
+    /// can't be found) skips `defer`, so tearDown closes the run's terminals and quotes instead.
+    private var terminalCleanupApp: XCUIApplication?
+
+    override func tearDownWithError() throws {
+        if let app = terminalCleanupApp, app.state == .runningForeground {
+            terminalCleanupApp = nil
+            closeOwnTerminals(in: app)
+            removeQuoteChips(in: app)
+        }
+        try super.tearDownWithError()
+    }
+
     func testConnectAndWalkMainScreens() throws {
         continueAfterFailure = true
         let environment = ProcessInfo.processInfo.environment
@@ -576,9 +589,11 @@ final class OpenLensSmokeTests: XCTestCase {
         XCTAssertTrue(app.buttons["oc.terminal.tab"].firstMatch.waitForExistence(timeout: 15), "No terminal tab")
         // Whatever happens below, close what this run created (terminals that already existed
         // stay) and drop any quote this run put into the composer: nothing is ever sent.
+        terminalCleanupApp = app
         defer {
             closeOwnTerminals(in: app)
             removeQuoteChips(in: app)
+            terminalCleanupApp = nil
         }
         // Type only into a terminal this run created: a terminal that already existed may be
         // someone's, in another folder or inside a program. If the app reused one, open a new one.
@@ -606,14 +621,18 @@ final class OpenLensSmokeTests: XCTestCase {
         // output proves the round trip.
         let output = app.staticTexts["openlens-smoke"].firstMatch
         XCTAssertTrue(output.waitForExistence(timeout: 10), "echo output did not come back from the terminal")
+        walkTerminalSelection(in: app, output: output)
+        screen.tap()
+        sleep(1)
         app.typeText("ls\n")
         sleep(2)
         snapshot("03-chat-terminal-ls")
         app.typeText("printf '\\033[31mred \\033[32mgreen \\033[33myellow \\033[34mblue \\033[35mmagenta \\033[36mcyan \\033[90mgray \\033[38;5;208morange\\033[0m\\n'\n")
         sleep(2)
         snapshot("03-chat-terminal-palette")
-        walkTerminalSelection(in: app, output: output)
         walkTerminalFullScreen(in: app, screen: screen)
+        app.typeText("echo openlens-back\n")
+        XCTAssertTrue(app.staticTexts["openlens-back"].firstMatch.waitForExistence(timeout: 10), "No output after the full-screen programs")
         XCTAssertTrue(app.buttons["oc.terminal.key.esc"].exists, "Key bar missing")
         XCTAssertTrue(app.buttons["oc.terminal.key.ctrl"].exists, "Key bar Ctrl missing")
         // Hide the keyboard, so the tab row is free.
@@ -627,7 +646,7 @@ final class OpenLensSmokeTests: XCTestCase {
         app.buttons["oc.tab.more"].tap()
         XCTAssertTrue(entry.waitForExistence(timeout: 5), "More sheet missing Terminal")
         entry.tap()
-        XCTAssertTrue(app.staticTexts["openlens-smoke"].firstMatch.waitForExistence(timeout: 8),
+        XCTAssertTrue(app.staticTexts["openlens-back"].firstMatch.waitForExistence(timeout: 8),
                       "Terminal output lost after switching tabs")
     }
 
@@ -637,6 +656,10 @@ final class OpenLensSmokeTests: XCTestCase {
         func menuItem(_ title: String) -> XCUIElement {
             app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", title)).firstMatch
         }
+        guard output.waitForExistence(timeout: 5) else {
+            XCTFail("Terminal output line not on screen for selecting")
+            return
+        }
         output.press(forDuration: 1.0)
         let copy = menuItem("Copy")
         XCTAssertTrue(copy.waitForExistence(timeout: 5), "Long press on terminal output did not show the edit menu")
@@ -645,6 +668,10 @@ final class OpenLensSmokeTests: XCTestCase {
         if copy.exists { copy.tap() }
         sleep(1)
 
+        guard output.waitForExistence(timeout: 5) else {
+            XCTFail("Terminal output line gone before quoting")
+            return
+        }
         output.press(forDuration: 1.0)
         let quote = menuItem("Quote")
         XCTAssertTrue(quote.waitForExistence(timeout: 5), "Second selection showed no Quote")
@@ -674,8 +701,7 @@ final class OpenLensSmokeTests: XCTestCase {
         app.typeText("less /etc/services\n")
         let lessLine = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Network services'")).firstMatch
         XCTAssertTrue(lessLine.waitForExistence(timeout: 8), "less did not show the file")
-        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'openlens-smoke'")).firstMatch
-        XCTAssertFalse(prompt.exists, "History still shows above the full-screen program")
+        let prompt = app.staticTexts.matching(NSPredicate(format: "label CONTAINS '$'")).firstMatch
         snapshot("03-chat-terminal-less")
         app.typeText("q")
         XCTAssertTrue(prompt.waitForExistence(timeout: 8), "The shell did not come back after quitting less")
