@@ -371,4 +371,20 @@ struct OCChangesS2Tests {
         #expect(AppText.ocLineCommentChipLocation(file: "src/hello.txt", start: 1, end: 1) == "hello.txt:1")
         #expect(AppText.ocLineCommentChipLocation(file: "src/hello.txt", start: 1, end: 3) == "hello.txt:1-3")
     }
+
+    @Test func aFailedChangesRequestSurfacesAsAnErrorForTheRetryState() async throws {
+        let (service, transport) = try await makeService(routes: [
+            "GET /api/vcs/diff": .status(503, #"{"_tag":"ServiceUnavailableError","message":"busy"}"#),
+        ])
+        await #expect(throws: OpenCodeError.self) {
+            try await service.loadChanges(sessionID: "s", mode: .git, directory: "/repo")
+        }
+        // A retry is a plain second request: nothing is cached after a failure.
+        transport.set("GET /api/vcs/diff", .ok(#"{"location":{"directory":"/repo"},"data":[]}"#))
+        let files = try await service.loadChanges(sessionID: "s", mode: .git, directory: "/repo")
+        #expect(files.isEmpty)
+        let sent = transport.requests(matching: "GET /api/vcs/diff")
+        #expect(sent.count == 2)
+        #expect(s2Query(sent[0], "mode") == "working")
+    }
 }
