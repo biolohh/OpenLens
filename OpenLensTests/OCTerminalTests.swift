@@ -483,6 +483,16 @@ nonisolated final class OCTerminalStubProtocol: URLProtocol, @unchecked Sendable
     private static let lock = NSLock()
     nonisolated(unsafe) private static var lists: [String: [[String: Any]]] = [:]
     nonisolated(unsafe) private static var snapshots: [String: Int] = [:]
+    nonisolated(unsafe) private static var listReads: [String: Int] = [:]
+    nonisolated(unsafe) private static var listDelay: [String: TimeInterval] = [:]
+
+    static func setListDelay(_ sessionID: String, seconds: TimeInterval) {
+        lock.withLock { listDelay[sessionID] = seconds }
+    }
+
+    static func listCount(_ sessionID: String) -> Int {
+        lock.withLock { listReads[sessionID] ?? 0 }
+    }
 
     static func setList(_ sessionID: String, ids: [String]) {
         lock.withLock { lists[sessionID] = ids.map { ["id": $0, "title": "Terminal"] } }
@@ -508,7 +518,11 @@ nonisolated final class OCTerminalStubProtocol: URLProtocol, @unchecked Sendable
         var status = 404
         var body = Data("{}".utf8)
         if parts.count >= 5, parts[2] == "session", parts[4] == "terminal" {
-            let items = Self.lock.withLock { Self.lists[parts[3]] ?? [] }
+            let (items, delay) = Self.lock.withLock { () -> ([[String: Any]], TimeInterval) in
+                Self.listReads[parts[3], default: 0] += 1
+                return (Self.lists[parts[3]] ?? [], Self.listDelay[parts[3]] ?? 0)
+            }
+            if delay > 0 { Thread.sleep(forTimeInterval: delay) }
             status = 200
             body = (try? JSONSerialization.data(withJSONObject: ["data": items])) ?? body
         } else if parts.count >= 5, parts[2] == "persistent-pty", parts[4] == "snapshot" {
@@ -558,6 +572,30 @@ struct OCTerminalAttachTests {
         #expect(store.connection == nil)
         try? await Task.sleep(for: .milliseconds(300))
         #expect(OCTerminalStubProtocol.snapshotCount("pty_f1c") == 0)
+    }
+
+    /// One list read at a time: requests during a read set the dirty bit and cost exactly one
+    /// more read afterwards (not one each, never out of order).
+    @Test func refreshIsSingleFlightWithOneRerunWhenDirty() async {
+        OCTerminalStubProtocol.setList("ses_n3", ids: ["pty_n3"])
+        let store = OCTerminalStore(sessionID: "ses_n3", directory: nil, client: OCTerminalStubProtocol.client())
+        await store.reload()
+        // The first attachment fails (stub 404) and checks the list once: let that settle.
+        await waitUntil { OCTerminalStubProtocol.snapshotCount("pty_n3") >= 1 }
+        try? await Task.sleep(for: .milliseconds(400))
+        let base = OCTerminalStubProtocol.listCount("ses_n3")
+        OCTerminalStubProtocol.setListDelay("ses_n3", seconds: 0.4)
+        let first = Task { await store.refresh() }
+        await waitUntil { OCTerminalStubProtocol.listCount("ses_n3") > base }
+        await store.refresh()
+        await store.refresh()
+        await store.refresh()
+        await first.value
+        #expect(OCTerminalStubProtocol.listCount("ses_n3") == base + 2)
+        OCTerminalStubProtocol.setListDelay("ses_n3", seconds: 0)
+        // Nothing pending: a later refresh reads once.
+        await store.refresh()
+        #expect(OCTerminalStubProtocol.listCount("ses_n3") == base + 3)
     }
 
     /// A session screen that is not shown (detached) is left alone by background / foreground:

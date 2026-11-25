@@ -480,20 +480,28 @@ final class OCTerminalStore {
         }
         refreshing = true
         defer { refreshing = false }
-        var attempts = 0
+        var failed = false
         repeat {
             refreshDirty = false
-            attempts += 1
             guard let client else { return }
             let before = mutations
-            guard let items = try? await client.list(sessionID: sessionID) else { return }
+            // Its own task: leaving the tab (which cancels the caller) must not cancel the read.
+            let read = Task { [sessionID] in try await client.list(sessionID: sessionID) }
+            guard let items = try? await read.value else {
+                failed = true
+                break
+            }
             // A create or close of this screen finished meanwhile: this answer may predate it.
             guard before == mutations else {
                 refreshDirty = true
                 continue
             }
             apply(items)
-        } while refreshDirty && attempts < 5
+        } while refreshDirty
+        // A change announced during a failed read still gets its read (not the failed one again).
+        if failed, refreshDirty {
+            Task { await self.refresh() }
+        }
     }
 
     /// The list as the server has it, from a change made elsewhere. It never attaches (no takeover
