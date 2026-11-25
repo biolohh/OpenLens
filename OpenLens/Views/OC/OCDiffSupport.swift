@@ -14,6 +14,7 @@ extension AppText {
     static let ocWrapLines = "Wrap lines"
     static let ocCreateGit = "Create Git repository"
     static let ocCreatingGit = "Creating…"
+    static let ocGitInitStale = "The repository was created, but the server still reports none. Reopen the project to refresh."
     static let ocLineCommentPlaceholder = "Add comment"
     static let ocLineCommentSubmit = "Comment"
     static let ocLineCommentCancel = "Cancel"

@@ -64,6 +64,9 @@ struct OCChangesAvailability: Equatable, Sendable {
     let modes: [OCChangesMode]
     /// The folder the repository is read at (the project's root); `nil` = the client's folder.
     var directory: String?
+    /// "Create Git repository" already succeeded for this folder in this app run, yet the project
+    /// list still reports no repository: no second POST is offered.
+    var initBlocked = false
 }
 
 /// A file a tool call changed, with whether its diff lines carry the file's real line numbers

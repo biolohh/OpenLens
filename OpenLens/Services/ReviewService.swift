@@ -9,6 +9,9 @@ final class ReviewService {
     var initTimeout: TimeInterval = OCVCSRemote.timeout
     /// `vcs.init` runs per folder: a second tap, or a re-mounted tab, joins the running request.
     private var initTasks: [String: Task<Void, Error>] = [:]
+    /// Folders whose init succeeded in this app run: if the project list is still stale for one of
+    /// them after the refresh, a second POST is never sent.
+    private var initializedFolders: Set<String> = []
 
     init(connection: ConnectionManager) {
         self.connection = connection
@@ -188,7 +191,10 @@ final class ReviewService {
         let project = byID?.vcs?.lowercased() == "git" ? byID
             : (byPath?.vcs?.lowercased() == "git" ? byPath : (byID ?? byPath))
         guard project?.vcs?.lowercased() == "git" else {
-            return OCChangesAvailability(isGit: false, modes: [], directory: directory)
+            return OCChangesAvailability(
+                isGit: false, modes: [], directory: directory,
+                initBlocked: directory.map { initializedFolders.contains($0) } ?? false
+            )
         }
         // Like the web, the repository is read at the project's root.
         let root = project?.worktree?.nilIfBlank ?? directory
@@ -238,6 +244,7 @@ final class ReviewService {
     /// folder nothing is sent; a second call for the same folder joins the running one.
     func initGitRepository(directory: String?) async throws {
         guard let directory = directory?.nilIfBlank else { throw OCVCSError.unavailable }
+        guard !initializedFolders.contains(directory) else { throw OCVCSError.initAlreadyDone }
         if let running = initTasks[directory] {
             try await running.value
             return
@@ -258,6 +265,7 @@ final class ReviewService {
         initTasks[directory] = task
         defer { initTasks[directory] = nil }
         try await task.value
+        initializedFolders.insert(directory)
     }
 
     /// The raw bytes of one file and its MIME type (the Files viewer's image and audio previews).

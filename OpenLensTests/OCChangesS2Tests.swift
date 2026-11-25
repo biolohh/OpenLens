@@ -156,6 +156,22 @@ struct OCChangesS2Tests {
         #expect(after.modes == [.git, .turn])
     }
 
+    @Test func aStaleProjectListAfterInitBlocksASecondPost() async throws {
+        let (service, transport) = try await makeService(routes: [
+            "GET /api/project": .ok(#"[{"id":"p1","worktree":"/work/site"}]"#),
+            "POST /api/vcs/init": .status(204, ""),
+        ])
+        try await service.initGitRepository(directory: "/work/site")
+        // Both the by-id and by-path matches still say "no repository".
+        let after = try await service.changesAvailability(sessionID: "s", directory: "/work/site", projectID: "p1")
+        #expect(!after.isGit && after.initBlocked)
+        await #expect(throws: OCVCSError.self) { try await service.initGitRepository(directory: "/work/site") }
+        #expect(transport.requests(matching: "POST /api/vcs/init").count == 1)
+        // Another folder is unaffected.
+        try await service.initGitRepository(directory: "/work/other")
+        #expect(transport.requests(matching: "POST /api/vcs/init").count == 2)
+    }
+
     @Test func gitInitFailureTextPrefersTheServerMessage() {
         let payload = OpenCodeAPIErrorPayload(tag: "ConflictError", message: "Already a repository", kind: nil, field: nil, resource: nil, service: nil, reference: nil)
         #expect(OCGitInitMessage.text(for: OpenCodeError.apiError(statusCode: 409, payload: payload)) == "Already a repository")

@@ -102,10 +102,13 @@ nonisolated enum OCVCSRemote {
 nonisolated enum OCVCSError: LocalizedError {
     /// No folder to act on, or not connected: the web's "Request failed".
     case unavailable
+    /// The init already succeeded for this folder, but the project list stayed stale.
+    case initAlreadyDone
 
     var errorDescription: String? {
         switch self {
         case .unavailable: AppText.ocRequestFailed
+        case .initAlreadyDone: AppText.ocGitInitStale
         }
     }
 }

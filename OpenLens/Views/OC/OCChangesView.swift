@@ -30,6 +30,8 @@ struct OCChangesView: View {
     /// "Create Git repository" in the no-git state: running, and the failure to show.
     @State private var creatingGit = false
     @State private var gitError: String?
+    /// The init already succeeded for this folder but the server still says "no repository".
+    @State private var gitBlocked = false
     /// The selected diff lines, and the comment being written for them.
     @State private var selection: OCDiffSelection?
     @State private var draft = ""
@@ -461,7 +463,7 @@ struct OCChangesView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(creatingGit)
+                .disabled(creatingGit || gitBlocked)
                 .accessibilityIdentifier("oc.changes.createGit")
                 if let gitError {
                     Text(gitError)
@@ -540,6 +542,8 @@ struct OCChangesView: View {
                 guard found.isGit, let first = found.modes.first else {
                     state = .noGit
                     creatingGit = false
+                    gitBlocked = found.initBlocked
+                    if found.initBlocked { gitError = AppText.ocGitInitStale }
                     // A request started before this tab was re-mounted is still running: join it.
                     if reviewService.isInitializingGit(directory: found.directory ?? session.directory) {
                         Task { await createGit() }
