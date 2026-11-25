@@ -33,6 +33,8 @@ struct OCChangesView: View {
     /// The selected diff lines, and the comment being written for them.
     @State private var selection: OCDiffSelection?
     @State private var draft = ""
+    /// The saved comment being edited (the web's "Edit").
+    @State private var editingComment: UUID?
     private let comments = OCDiffCommentStore.shared
 
     private struct LoadKey: Hashable {
@@ -71,6 +73,17 @@ struct OCChangesView: View {
         // A marker, not an identifier on the container (that one would replace the children's).
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.changes")
+        }
+        .onChange(of: mode) { _, newValue in
+            guard let newValue else { return }
+            var memory = OCSessionMemory.shared.changes(sessionID: session.id)
+            memory.mode = newValue
+            OCSessionMemory.shared.setChanges(memory, sessionID: session.id)
+        }
+        .onChange(of: expanded) { _, newValue in
+            var memory = OCSessionMemory.shared.changes(sessionID: session.id)
+            memory.expanded = newValue
+            OCSessionMemory.shared.setChanges(memory, sessionID: session.id)
         }
         .task(id: LoadKey(sessionID: session.id, mode: mode, reload: reloadToken, refresh: refreshKey)) { await load() }
     }
@@ -267,7 +280,7 @@ struct OCChangesView: View {
                 }
                 .padding(.horizontal, 16)
                 .frame(height: 40)
-                .background(colorScheme == .dark ? Color.appBackground : Color.appTertiary.opacity(0.5))
+                // The panel's own colour, like the web's sub-header (no darker band).
                 OCGuardedDiff(
                     file: file,
                     selection: $selection,
@@ -296,83 +309,118 @@ struct OCChangesView: View {
         let editing = selection?.file == file.path
         VStack(alignment: .leading, spacing: 8) {
             ForEach(saved) { comment in
-                HStack(alignment: .top, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(comment.text)
-                            .font(.system(size: 14)).foregroundStyle(Color.appPrimary)
-                        Text(AppText.ocLineCommentSaved(start: comment.startLine, end: comment.endLine))
-                            .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
-                    }
-                    Spacer(minLength: 0)
-                    Button { comments.remove(comment.id) } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(Color.appSecondary)
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("oc.changes.comment.remove")
-                    .accessibilityLabel(AppText.ocLineCommentRemove)
+                if editingComment == comment.id {
+                    commentEditor(
+                        label: AppText.ocLineCommentEditing(start: comment.startLine, end: comment.endLine),
+                        submitLabel: AppText.ocLineCommentSave,
+                        onCancel: { editingComment = nil; draft = "" },
+                        onSubmit: {
+                            comments.update(comment.id, text: draft)
+                            editingComment = nil
+                            draft = ""
+                        }
+                    )
+                } else {
+                    savedComment(comment)
                 }
-                .padding(10)
-                .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("oc.changes.comment")
             }
             // The web opens the editor as soon as lines are selected.
-            if editing, let current = selection {
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField(AppText.ocLineCommentPlaceholder, text: $draft, axis: .vertical)
-                        .font(.system(size: 14))
-                        .lineLimit(2...6)
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                        .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appAccent, lineWidth: 1))
-                        .accessibilityIdentifier("oc.changes.comment.field")
-                    Text(AppText.ocLineCommentEditing(start: current.startLine, end: current.endLine))
-                        .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
-                    HStack(spacing: 8) {
-                        Button { selection = nil; draft = "" } label: {
-                            Text(AppText.ocLineCommentCancel)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(Color.appPrimary)
-                                .padding(.horizontal, 12)
-                                .frame(height: 30)
-                                .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
-                                .contentShape(Rectangle())
+            if editing, let current = selection, editingComment == nil {
+                commentEditor(
+                    label: AppText.ocLineCommentEditing(start: current.startLine, end: current.endLine),
+                    submitLabel: AppText.ocLineCommentSubmit,
+                    onCancel: { selection = nil; draft = "" },
+                    onSubmit: {
+                        if comments.add(sessionID: session.id, file: path, selection: current, text: draft) != nil {
+                            draft = ""
+                            selection = nil
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("oc.changes.comment.cancel")
-                        let canSubmit = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        Button {
-                            if comments.add(sessionID: session.id, file: path, selection: current, text: draft) != nil {
-                                draft = ""
-                                selection = nil
-                            }
-                        } label: {
-                            Text(AppText.ocLineCommentSubmit)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundStyle(canSubmit ? Color.appBackground : Color.appSecondary)
-                                .padding(.horizontal, 12)
-                                .frame(height: 30)
-                                .background(canSubmit ? Color.appPrimary : Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!canSubmit)
-                        .accessibilityIdentifier("oc.changes.comment.submit")
                     }
-                }
-                .padding(12)
-                .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+                )
             }
         }
         .padding(.horizontal, saved.isEmpty && !editing ? 0 : 16)
         .padding(.vertical, saved.isEmpty && !editing ? 0 : 10)
+    }
+
+    /// A saved comment: its text, "Comment on line N", and the web's "..." menu (Edit, Delete).
+    private func savedComment(_ comment: OCDiffComment) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(comment.text)
+                    .font(.system(size: 14)).foregroundStyle(Color.appPrimary)
+                Text(AppText.ocLineCommentSaved(start: comment.startLine, end: comment.endLine))
+                    .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
+            }
+            Spacer(minLength: 0)
+            Menu {
+                Button(AppText.ocLineCommentEdit, systemImage: "pencil") {
+                    draft = comment.text
+                    selection = nil
+                    editingComment = comment.id
+                }
+                Button(AppText.ocLineCommentDelete, systemImage: "trash", role: .destructive) {
+                    comments.remove(comment.id)
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(Color.appPrimary)
+                    .frame(width: 32, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityIdentifier("oc.changes.comment.menu")
+            .accessibilityLabel(AppText.ocLineCommentMore)
+        }
+        .padding(10)
+        .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("oc.changes.comment")
+    }
+
+    private func commentEditor(label: String, submitLabel: String, onCancel: @escaping () -> Void, onSubmit: @escaping () -> Void) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            TextField(AppText.ocLineCommentPlaceholder, text: $draft, axis: .vertical)
+                .font(.system(size: 14))
+                .lineLimit(2...6)
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .background(Color.appBackground, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(Color.appAccent, lineWidth: 1))
+                .accessibilityIdentifier("oc.changes.comment.field")
+            Text(label)
+                .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
+            HStack(spacing: 8) {
+                Button(action: onCancel) {
+                    Text(AppText.ocLineCommentCancel)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Color.appPrimary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("oc.changes.comment.cancel")
+                let canSubmit = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                Button(action: onSubmit) {
+                    Text(submitLabel)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(canSubmit ? Color.appBackground : Color.appSecondary)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .background(canSubmit ? Color.appPrimary : Color.appTertiary, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(!canSubmit)
+                .accessibilityIdentifier("oc.changes.comment.submit")
+            }
+        }
+        .padding(12)
+        .background(Color.appTertiary.opacity(0.6), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.appSeparator, lineWidth: 1))
     }
 
     private func statusColor(_ status: String) -> Color {
@@ -500,7 +548,9 @@ struct OCChangesView: View {
                 }
                 creatingGit = false
                 // Setting the mode re-keys the task, which then loads the files.
-                mode = first
+                let remembered = OCSessionMemory.shared.changes(sessionID: session.id)
+                if expanded.isEmpty { expanded = remembered.expanded }
+                mode = OCSessionMemory.resolvedMode(remembered: remembered.mode, offered: found.modes) ?? first
                 return
             }
             guard let mode else { return }

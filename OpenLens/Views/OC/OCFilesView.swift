@@ -1,3 +1,4 @@
+import AVFoundation
 import SwiftUI
 
 /// The web's Files view (More... > Files): a row with "All files" and the open file tabs, then
@@ -26,6 +27,19 @@ struct OCFilesView: View {
         // A marker, not an identifier on the container (that one would replace the children's).
         .overlay(alignment: .topLeading) {
             Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.files")
+        }
+        // Open tabs outlive the view for the rest of the app run (per session folder).
+        .onAppear {
+            if openPaths.isEmpty, let remembered = OCSessionMemory.shared.files(directory: directory) {
+                openPaths = remembered.openPaths
+                activePath = remembered.activePath
+            }
+        }
+        .onChange(of: openPaths) { _, _ in
+            OCSessionMemory.shared.setFiles(OCFilesMemory(openPaths: openPaths, activePath: activePath), directory: directory)
+        }
+        .onChange(of: activePath) { _, _ in
+            OCSessionMemory.shared.setFiles(OCFilesMemory(openPaths: openPaths, activePath: activePath), directory: directory)
         }
     }
 
@@ -315,11 +329,16 @@ private struct OCFileTree: View {
     }
 }
 
-/// One file as read-only line-numbered monospace text (JetBrains Mono through `openLensMono`).
+/// One file in the Files view: coloured, line-numbered monospace text (read only); Markdown opens
+/// as the rendered document with the web's source / preview switch; images show inline, audio
+/// gets a play control; anything else reads "Binary file".
 private struct OCFileTextView: View {
     private enum LoadState {
         case loading
-        case text([AttributedString])
+        case text(lines: [AttributedString], markdown: String?)
+        case image(UIImage)
+        case audio(URL)
+        case binary
         case failed(String)
     }
 
@@ -329,7 +348,10 @@ private struct OCFileTextView: View {
     let path: String
 
     @Environment(\.workspaceService) private var workspaceService
+    @Environment(\.reviewService) private var reviewService
     @State private var state: LoadState = .loading
+    /// Markdown starts as the rendered preview, like the web.
+    @State private var showsSource = false
 
     var body: some View {
         Group {
@@ -337,39 +359,96 @@ private struct OCFileTextView: View {
             case .loading:
                 ProgressView().tint(Color.appSecondary).frame(maxWidth: .infinity, maxHeight: .infinity)
             case .failed(let message):
-                Text(message)
-                    .font(.system(size: 13))
-                    .foregroundStyle(Color.appSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(24)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .text(let lines):
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
-                        ForEach(lines.indices, id: \.self) { index in
-                            HStack(alignment: .top, spacing: 0) {
-                                Text("\(index + 1)")
-                                    .font(.openLensMono(size: 12))
-                                    .foregroundStyle(Color.appSecondary)
-                                    .frame(width: 44, alignment: .trailing)
-                                Text(lines[index])
-                                    .font(.openLensMono(size: 12))
-                                    .foregroundStyle(Color.appPrimary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.leading, 12)
-                                    .padding(.trailing, 8)
-                            }
-                            .padding(.vertical, 2)
-                        }
-                    }
-                    .padding(.vertical, 6)
+                centeredText(message)
+            case .binary:
+                centeredText(AppText.ocBinaryFile).accessibilityIdentifier("oc.file.binary")
+            case .image(let image):
+                ScrollView([.horizontal, .vertical]) {
+                    Image(uiImage: image).resizable().scaledToFit()
+                        .frame(maxWidth: .infinity)
+                        .padding(16)
                 }
                 .overlay(alignment: .topLeading) {
-                    Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.file.content")
+                    Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.file.image")
+                }
+            case .audio(let url):
+                OCAudioPreview(url: url)
+            case .text(let lines, let markdown):
+                VStack(spacing: 0) {
+                    if markdown != nil { markdownHeader }
+                    if let markdown, !showsSource {
+                        ScrollView {
+                            DeferredMarkdownTextView(text: markdown, foregroundColor: Color.appPrimary, usesRetroTypography: false)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(16)
+                        }
+                        .overlay(alignment: .topLeading) {
+                            Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.file.markdown")
+                        }
+                    } else {
+                        source(lines)
+                    }
                 }
             }
         }
         .task(id: path) { await load() }
+    }
+
+    private func centeredText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 13))
+            .foregroundStyle(Color.appSecondary)
+            .multilineTextAlignment(.center)
+            .padding(24)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var markdownHeader: some View {
+        HStack(spacing: 8) {
+            Text((path as NSString).lastPathComponent)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.appPrimary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+            Button { showsSource.toggle() } label: {
+                Image(systemName: showsSource ? "eye" : "chevron.left.forwardslash.chevron.right")
+                    .font(.system(size: 13))
+                    .foregroundStyle(Color.appSecondary)
+                    .frame(width: 32, height: 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.file.toggle")
+            .accessibilityLabel(showsSource ? "Preview" : "Source")
+        }
+        .padding(.horizontal, 16)
+        .frame(height: 40)
+    }
+
+    private func source(_ lines: [AttributedString]) -> some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(lines.indices, id: \.self) { index in
+                    HStack(alignment: .top, spacing: 0) {
+                        Text("\(index + 1)")
+                            .font(.openLensMono(size: 12))
+                            .foregroundStyle(Color.appSecondary)
+                            .frame(width: 44, alignment: .trailing)
+                        Text(lines[index])
+                            .font(.openLensMono(size: 12))
+                            .foregroundStyle(Color.appPrimary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.leading, 12)
+                            .padding(.trailing, 8)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .overlay(alignment: .topLeading) {
+            Color.clear.frame(width: 1, height: 1).accessibilityIdentifier("oc.file.content")
+        }
     }
 
     private func load() async {
@@ -378,23 +457,93 @@ private struct OCFileTextView: View {
             return
         }
         state = .loading
+        showsSource = false
+        let kind = OCFileSupport.previewKind(path: path)
         do {
-            let text = try await workspaceService.readRepositoryFile(at: path, in: directory)
-            guard !Task.isCancelled else { return }
-            let maximum = Self.maximumLines
-            let language = OCSyntaxLanguage.detect(path: path)
-            // Split and tokenised in one pass off the main actor, so block comments and multi-line
-            // strings carry across lines.
-            let lines = await Task.detached(priority: .userInitiated) {
-                OCSyntaxHighlighter.highlight(
-                    lines: OCFileSupport.cappedLines(text, maximumLines: maximum), language: language
-                ).map(OCSyntaxTheme.attributed)
-            }.value
-            guard !Task.isCancelled else { return }
-            state = .text(lines)
+            switch kind {
+            case .image, .audio:
+                let (data, _) = try await reviewService.readFileData(path: path, directory: directory)
+                guard !Task.isCancelled else { return }
+                if kind == .image {
+                    let image = await Task.detached(priority: .userInitiated) { UIImage(data: data) }.value
+                    guard !Task.isCancelled else { return }
+                    state = image.map { .image($0) } ?? .binary
+                } else {
+                    let ext = (path as NSString).pathExtension
+                    let url = FileManager.default.temporaryDirectory.appendingPathComponent("oc-audio-\(UUID().uuidString).\(ext)")
+                    try data.write(to: url)
+                    state = .audio(url)
+                }
+            case .text, .markdown:
+                let text = try await workspaceService.readRepositoryFile(at: path, in: directory)
+                guard !Task.isCancelled else { return }
+                let maximum = Self.maximumLines
+                let language = OCSyntaxLanguage.detect(path: path)
+                // Split and tokenised in one pass off the main actor, so block comments and multi-line
+                // strings carry across lines.
+                let lines = await Task.detached(priority: .userInitiated) {
+                    OCSyntaxHighlighter.highlight(
+                        lines: OCFileSupport.cappedLines(text, maximumLines: maximum), language: language
+                    ).map(OCSyntaxTheme.attributed)
+                }.value
+                guard !Task.isCancelled else { return }
+                state = .text(lines: lines, markdown: kind == .markdown ? text : nil)
+            }
         } catch {
             guard !Task.isCancelled else { return }
-            state = .failed(error.localizedDescription)
+            if case OpenCodeError.invalidPayload(let reason) = error, reason == AppText.repositoryFileNotText {
+                state = .binary
+            } else {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+}
+
+/// A play / pause control for an audio file (the web's audio preview).
+private struct OCAudioPreview: View {
+    let url: URL
+    @State private var player: AVAudioPlayer?
+    @State private var isPlaying = false
+    @State private var failed = false
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Button { toggle() } label: {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 44))
+                    .foregroundStyle(Color.appPrimary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("oc.file.audio.play")
+            .accessibilityLabel(isPlaying ? "Pause" : "Play")
+            Text(failed ? AppText.ocBinaryFile : url.lastPathComponent)
+                .font(.system(size: 12)).foregroundStyle(Color.appSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onDisappear {
+            player?.stop()
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private func toggle() {
+        if player == nil {
+            player = try? AVAudioPlayer(contentsOf: url)
+            failed = player == nil
+        }
+        guard let player else { return }
+        if player.isPlaying {
+            player.pause()
+            isPlaying = false
+        } else {
+            try? AVAudioSession.sharedInstance().setCategory(.playback)
+            isPlaying = player.play()
+            // Back to the play icon when it ends.
+            Task {
+                while player.isPlaying { try? await Task.sleep(for: .milliseconds(300)) }
+                isPlaying = false
+            }
         }
     }
 }

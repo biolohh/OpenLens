@@ -260,6 +260,18 @@ final class ReviewService {
         try await task.value
     }
 
+    /// The raw bytes of one file and its MIME type (the Files viewer's image and audio previews).
+    func readFileData(path: String, directory: String) async throws -> (Data, String?) {
+        guard let client = connection.client else { throw OpenCodeError.notConnected }
+        let endpoint = await client.connectionEndpoint()
+        let request = OCVCSRemote.fileRequest(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory, path: path)
+        let (data, response) = try await vcsTransport.data(for: request)
+        try OCVCSRemote.validate(response, data: data)
+        let mime = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Type")?
+            .split(separator: ";", maxSplits: 1).first.map(String.init)
+        return (data, mime)
+    }
+
     func vcsInfo(directory: String) async throws -> OCVCSInfo {
         guard let client = connection.client else { throw OpenCodeError.notConnected }
         let endpoint = await client.connectionEndpoint()

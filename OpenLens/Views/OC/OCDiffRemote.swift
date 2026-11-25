@@ -44,6 +44,22 @@ nonisolated enum OCVCSRemote {
         )
     }
 
+    /// `GET /api/fs/read/<path>`: the raw bytes of one file (images, audio), built like the client's own.
+    static func fileRequest(baseURL: URL, authHeader: String?, directory: String, path: String) -> URLRequest {
+        var url = baseURL.appending(path: "api/fs/read")
+        let segments = path.split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0) }
+        url.append(path: segments.joined(separator: "/"))
+        if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            components.queryItems = [URLQueryItem(name: "location[directory]", value: directory)]
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
+            url = components.url ?? url
+        }
+        var request = URLRequest(url: url, timeoutInterval: 60)
+        if let authHeader { request.setValue(authHeader, forHTTPHeaderField: "Authorization") }
+        return request
+    }
+
     static func infoRequest(baseURL: URL, authHeader: String?, directory: String) -> URLRequest {
         request(baseURL: baseURL, authHeader: authHeader, method: "GET", endpoint: "/api/vcs", directory: directory)
     }

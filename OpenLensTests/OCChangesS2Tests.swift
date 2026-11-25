@@ -487,4 +487,49 @@ struct OCChangesS2Tests {
         let saved = try #require(store.add(sessionID: "s", file: "a", selection: removed, text: "x"))
         #expect(saved.side == .deletions)
     }
+
+    @Test func editingACommentChangesItsText() throws {
+        let store = OCDiffCommentStore()
+        let selection = OCDiffSelection(file: "a", rows: 0...0, startLine: 1, endLine: 1, preview: "p")
+        let saved = try #require(store.add(sessionID: "s", file: "a", selection: selection, text: "first"))
+        store.update(saved.id, text: "  second ")
+        #expect(store.comments(sessionID: "s").first?.text == "second")
+        #expect(store.comments(sessionID: "s").first?.note.hasSuffix(": second") == true)
+        store.update(saved.id, text: "   ")
+        #expect(store.comments(sessionID: "s").first?.text == "second")
+    }
+
+    @Test func filesAreClassifiedForPreview() {
+        #expect(OCFileSupport.previewKind(path: "docs/README.md") == .markdown)
+        #expect(OCFileSupport.previewKind(path: "a/Photo.JPG") == .image)
+        #expect(OCFileSupport.previewKind(path: "a.png") == .image)
+        #expect(OCFileSupport.previewKind(path: "song.m4a") == .audio)
+        #expect(OCFileSupport.previewKind(path: "main.swift") == .text)
+        #expect(OCFileSupport.previewKind(path: "logo.svg") == .text)
+    }
+
+    @Test func rememberedModeCountsOnlyWhileOffered() {
+        #expect(OCSessionMemory.resolvedMode(remembered: .branch, offered: [.git, .branch, .turn]) == .branch)
+        #expect(OCSessionMemory.resolvedMode(remembered: .branch, offered: [.git, .turn]) == .git)
+        #expect(OCSessionMemory.resolvedMode(remembered: nil, offered: [.git, .turn]) == .git)
+        #expect(OCSessionMemory.resolvedMode(remembered: .turn, offered: []) == nil)
+    }
+
+    @Test func sessionMemoryKeepsTabsAndChangesPerSession() {
+        let memory = OCSessionMemory()
+        memory.setChanges(OCChangesMemory(mode: .turn, expanded: ["a"]), sessionID: "s1")
+        #expect(memory.changes(sessionID: "s1").mode == .turn)
+        #expect(memory.changes(sessionID: "s2").mode == nil)
+        memory.setFiles(OCFilesMemory(openPaths: ["x.md"], activePath: "x.md"), directory: "/repo")
+        #expect(memory.files(directory: "/repo")?.activePath == "x.md")
+        #expect(memory.files(directory: "/other") == nil)
+    }
+
+    @Test func fileBytesAreReadFromTheFsRoute() async throws {
+        let (service, transport) = try await makeService(routes: ["GET /api/fs/read/dir/a b.png": .ok("PNGDATA")])
+        let (data, _) = try await service.readFileData(path: "dir/a b.png", directory: "/repo")
+        #expect(String(data: data, encoding: .utf8) == "PNGDATA")
+        let request = try #require(transport.requests().last(where: { $0.url?.path.contains("fs/read") == true }))
+        #expect(s2Query(request, "location[directory]") == "/repo")
+    }
 }

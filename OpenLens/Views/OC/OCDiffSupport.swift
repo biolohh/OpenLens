@@ -17,6 +17,10 @@ extension AppText {
     static let ocLineCommentSubmit = "Comment"
     static let ocLineCommentCancel = "Cancel"
     static let ocLineCommentRemove = "Remove comment"
+    static let ocLineCommentEdit = "Edit"
+    static let ocLineCommentDelete = "Delete"
+    static let ocLineCommentSave = "Save"
+    static let ocLineCommentMore = "More options"
     static let ocGitTimeout = "The server took too long to answer"
     /// "line 4" / "lines 4-9", as the web names a selection.
     static func ocLineCommentRange(start: Int, end: Int) -> String {
@@ -36,6 +40,21 @@ extension AppText {
 enum OCDiffSettings {
     /// "Wrap lines" (the web's `settings-mobile-diff-wrap`, on by default).
     static let wrapKey = "oc.diff.wrap"
+}
+
+// MARK: - File kinds (Files viewer)
+
+nonisolated enum OCFilePreviewKind: Sendable { case text, markdown, image, audio }
+
+extension OCFileSupport {
+    nonisolated static func previewKind(path: String) -> OCFilePreviewKind {
+        switch (path as NSString).pathExtension.lowercased() {
+        case "md", "markdown", "mdx": .markdown
+        case "png", "jpg", "jpeg", "gif", "webp", "heic", "bmp", "tiff", "ico": .image
+        case "mp3", "wav", "m4a", "aac", "flac", "ogg", "oga", "aif", "aiff": .audio
+        default: .text
+        }
+    }
 }
 
 // MARK: - Large diffs and binary files
@@ -118,7 +137,7 @@ nonisolated struct OCDiffComment: Identifiable, Equatable, Sendable {
     let file: String
     let startLine: Int
     let endLine: Int
-    let text: String
+    var text: String
     let preview: String
     var side: OCDiffSide = .additions
 
@@ -156,6 +175,13 @@ final class OCDiffCommentStore {
         )
         all.append(comment)
         return comment
+    }
+
+    /// The web's "Edit": new text for a saved comment (blank text keeps the old one).
+    func update(_ id: UUID, text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let index = all.firstIndex(where: { $0.id == id }) else { return }
+        all[index].text = trimmed
     }
 
     func remove(_ id: UUID) {
@@ -236,5 +262,41 @@ nonisolated final class OCDiffRender: @unchecked Sendable {
             cache.setObject(render, forKey: key, cost: cost)
         }
         return render
+    }
+}
+
+
+// MARK: - What the tabs remember per session (in memory, per app run)
+
+nonisolated struct OCChangesMemory: Sendable {
+    var mode: OCChangesMode?
+    var expanded: Set<String> = []
+}
+
+nonisolated struct OCFilesMemory: Sendable {
+    var openPaths: [String] = []
+    var activePath: String?
+}
+
+/// Like the web's per-session review model: the chosen Changes mode and expanded files, and the open
+/// Files tabs, outlive the tab views for the rest of the app run. The Files tabs are keyed by the
+/// session's folder (the Files view only knows the folder).
+@MainActor
+final class OCSessionMemory {
+    static let shared = OCSessionMemory()
+    private var changes: [String: OCChangesMemory] = [:]
+    private var files: [String: OCFilesMemory] = [:]
+
+    func changes(sessionID: String) -> OCChangesMemory { changes[sessionID] ?? OCChangesMemory() }
+    func setChanges(_ value: OCChangesMemory, sessionID: String) { changes[sessionID] = value }
+    func files(directory: String?) -> OCFilesMemory? { directory.flatMap { files[$0] } }
+    func setFiles(_ value: OCFilesMemory, directory: String?) {
+        if let directory { files[directory] = value }
+    }
+
+    /// The remembered mode while it is still offered, else the first one (the web's rule).
+    nonisolated static func resolvedMode(remembered: OCChangesMode?, offered: [OCChangesMode]) -> OCChangesMode? {
+        if let remembered, offered.contains(remembered) { return remembered }
+        return offered.first
     }
 }

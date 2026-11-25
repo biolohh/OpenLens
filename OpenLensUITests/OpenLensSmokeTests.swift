@@ -269,7 +269,7 @@ final class OpenLensSmokeTests: XCTestCase {
         row.tap()
         sleep(3)
         snapshot("03-chat-empty")
-        walkSessionScreen(in: app, expectsFileCard: sessionTitle.contains("Wondednet"), expectsChanges: sessionTitle.contains("implementer"))
+        walkSessionScreen(in: app, expectsFileCard: sessionTitle.contains("Wondednet"), expectsChanges: sessionTitle.contains("implementer"), sessionHasMarkdown: sessionTitle.contains("implementer"))
 
         guard let prompt, !prompt.isEmpty else {
             // The navigation bar is hidden: the interactive edge-swipe back must still work.
@@ -303,7 +303,7 @@ final class OpenLensSmokeTests: XCTestCase {
     }
 
     /// The web-style session screen: header, Session | Changes | More... tabs, the "Used N" group.
-    private func walkSessionScreen(in app: XCUIApplication, expectsFileCard: Bool = false, expectsChanges: Bool = false) {
+    private func walkSessionScreen(in app: XCUIApplication, expectsFileCard: Bool = false, expectsChanges: Bool = false, sessionHasMarkdown: Bool = false) {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.session").firstMatch
             .waitForExistence(timeout: 10), "Session screen marker missing")
         XCTAssertTrue(app.buttons["oc.tab.session"].exists, "Session tab missing")
@@ -444,6 +444,24 @@ final class OpenLensSmokeTests: XCTestCase {
                     XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.changes.comment").firstMatch
                         .waitForExistence(timeout: 4), "Comment was not added")
                     snapshot("03-chat-changes-comment-added")
+                    // The web's "..." menu: Edit changes the text (saved text shows in the chip below).
+                    let menu = app.buttons["oc.changes.comment.menu"].firstMatch
+                    XCTAssertTrue(menu.waitForExistence(timeout: 4), "Saved comment lacks its ... menu")
+                    menu.tap()
+                    let edit = app.buttons["Edit"]
+                    if edit.waitForExistence(timeout: 3) {
+                        snapshot("03-chat-changes-comment-menu")
+                        edit.tap()
+                        let editField = app.textFields["oc.changes.comment.field"].exists
+                            ? app.textFields["oc.changes.comment.field"] : app.textViews["oc.changes.comment.field"]
+                        XCTAssertTrue(editField.waitForExistence(timeout: 4), "Edit did not open the editor")
+                        editField.tap()
+                        editField.typeText(" edited")
+                        app.buttons["oc.changes.comment.submit"].tap()
+                        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.changes.comment").firstMatch
+                            .waitForExistence(timeout: 4), "Edited comment missing")
+                        snapshot("03-chat-changes-comment-edited")
+                    }
                     // It waits in the composer of the Session tab as a chip.
                     app.buttons["oc.tab.session"].tap()
                     XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.composer.comment").firstMatch
@@ -454,6 +472,13 @@ final class OpenLensSmokeTests: XCTestCase {
                         .waitForNonExistence(timeout: 4), "Comment chip was not removed")
                     app.buttons["oc.tab.changes"].tap()
                     _ = app.buttons["oc.changes.file"].firstMatch.waitForExistence(timeout: 6)
+                    // The tab remembers its mode and expanded files for the session.
+                    let remembered = app.descendants(matching: .any).matching(identifier: "oc.changes.mode").firstMatch
+                    XCTAssertTrue(remembered.waitForExistence(timeout: 4), "Mode control missing after returning")
+                    XCTAssertTrue(remembered.label.contains("Last turn"), "Mode was not remembered: \(remembered.label)")
+                    XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.diff").firstMatch
+                        .waitForExistence(timeout: 6), "Expanded files were not remembered")
+                    snapshot("03-chat-changes-remembered")
                 }
                 let open = app.buttons["oc.changes.openFile"].firstMatch
                 if open.waitForExistence(timeout: 3) {
@@ -488,6 +513,24 @@ final class OpenLensSmokeTests: XCTestCase {
             XCTAssertTrue(hit || app.staticTexts["No results"].exists, "Filter shows neither results nor No results")
             filter.typeText(XCUIKeyboardKey.delete.rawValue)
             sleep(2)
+        }
+        // Markdown opens as the rendered document; the switch shows the coloured source.
+        if app.textFields["oc.files.filter"].exists, !app.staticTexts["No results"].exists, sessionHasMarkdown {
+            let filterField = app.textFields["oc.files.filter"]
+            filterField.tap()
+            filterField.typeText("PROGRESS")
+            let mdRow = app.buttons["oc.files.row"].firstMatch
+            if mdRow.waitForExistence(timeout: 10) {
+                mdRow.tap()
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.markdown").firstMatch
+                    .waitForExistence(timeout: 8), "Markdown did not open as a rendered preview")
+                snapshot("03-chat-files-markdown")
+                app.buttons["oc.file.toggle"].tap()
+                XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "oc.file.content").firstMatch
+                    .waitForExistence(timeout: 6), "Source switch did not show the source")
+                snapshot("03-chat-files-markdown-source")
+                app.buttons["oc.files.all"].tap()
+            }
         }
         let rows = app.buttons.matching(identifier: "oc.files.row")
         let folder = rows.matching(NSPredicate(format: "value == 'collapsed'")).firstMatch

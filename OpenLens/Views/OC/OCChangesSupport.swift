@@ -409,7 +409,7 @@ struct OCDiffBlock: View {
             if !wraps { Spacer(minLength: 0) }
         }
         .frame(maxWidth: wraps ? nil : .infinity, alignment: .leading)
-        .background(tint(line.kind))
+        .background { Rectangle().fill(tint(line.kind)) }
         .overlay { Rectangle().fill(Color.appAccent.opacity(isSelected(index) ? 0.18 : 0)) }
         if let selection {
             content
