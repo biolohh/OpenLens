@@ -560,6 +560,26 @@ struct OCTerminalAttachTests {
         #expect(OCTerminalStubProtocol.snapshotCount("pty_f1c") == 0)
     }
 
+    /// A session screen that is not shown (detached) is left alone by background / foreground:
+    /// no reattach, so no takeover of a terminal nobody sees.
+    @Test func detachedScreenIsNotReattachedOnForeground() async {
+        OCTerminalStubProtocol.setList("ses_n2", ids: ["pty_n2"])
+        let store = OCTerminalStore(sessionID: "ses_n2", directory: nil, client: OCTerminalStubProtocol.client())
+        await store.reload()
+        await waitUntil { OCTerminalStubProtocol.snapshotCount("pty_n2") >= 1 }
+        try? await Task.sleep(for: .milliseconds(300))
+        let before = OCTerminalStubProtocol.snapshotCount("pty_n2")
+        store.disconnect()
+        #expect(store.detached)
+        store.background()
+        await store.foreground(apiClient: nil)
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(OCTerminalStubProtocol.snapshotCount("pty_n2") == before)
+        // A chip tap (select) attaches again and ends the detached state.
+        store.select("pty_n2")
+        #expect(!store.detached)
+    }
+
     /// Background detaches; the foreground starts one new attachment (one more snapshot).
     @Test func foregroundReattachesOnce() async {
         OCTerminalStubProtocol.setList("ses_fg", ids: ["pty_fg"])

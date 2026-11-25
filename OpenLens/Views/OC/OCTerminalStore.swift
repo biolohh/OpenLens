@@ -329,6 +329,9 @@ final class OCTerminalStore {
     /// Bumped by every create and close, so a list read that raced one is read again.
     @ObservationIgnored private var mutations = 0
     @ObservationIgnored private var backgrounded = false
+    /// The session screen is not shown (another screen pushed over it, or it left): the app's
+    /// background / foreground must not reattach (and take control of) a terminal nobody sees.
+    @ObservationIgnored private(set) var detached = false
     @ObservationIgnored private nonisolated(unsafe) var eventObservers: [NSObjectProtocol] = []
     /// One list read at a time; a change announced meanwhile reads it once more afterwards.
     @ObservationIgnored private var refreshing = false
@@ -360,6 +363,7 @@ final class OCTerminalStore {
     /// shown terminal if its socket ended.
     func appear(apiClient: OpenCodeClient?, isV2: Bool, seedsEmpty: Bool = true) async {
         self.seedsEmpty = seedsEmpty
+        detached = false
         guard isV2, let apiClient else {
             phase = .unavailable(AppText.ocTerminalUnavailable)
             return
@@ -408,7 +412,7 @@ final class OCTerminalStore {
 
     /// The app went to the background: detach now, so the suspended socket can't die unseen.
     func background() {
-        guard phase == .ready else { return }
+        guard phase == .ready, !detached else { return }
         backgrounded = true
         connection?.disconnect()
     }
@@ -552,6 +556,7 @@ final class OCTerminalStore {
 
     func select(_ id: String) {
         guard let client else { return }
+        detached = false
         if activeID == id, connection?.ptyID == id {
             connection?.start()
             return
@@ -600,6 +605,7 @@ final class OCTerminalStore {
 
     /// Detaches (leaving the session screen); the terminals keep running on the server.
     func disconnect() {
+        detached = true
         connection?.disconnect()
     }
 }
