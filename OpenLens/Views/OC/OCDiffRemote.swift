@@ -25,6 +25,8 @@ nonisolated enum OCVCSRemote {
         var url = baseURL.appending(path: rawPath)
         if var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
             components.queryItems = queryItems + [URLQueryItem(name: "location[directory]", value: directory)]
+            // A folder name with "+" must not read as a space on the server.
+            components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
             url = components.url ?? url
         }
         var request = URLRequest(url: url, timeoutInterval: timeout)
@@ -51,6 +53,22 @@ nonisolated enum OCVCSRemote {
             baseURL: baseURL, authHeader: authHeader, method: "POST", endpoint: "/api/vcs/init", directory: directory,
             queryItems: [URLQueryItem(name: "provider", value: "git")]
         )
+    }
+
+    /// Runs `operation`, cancelling it and throwing `URLError.timedOut` after `seconds`.
+    static func withTimeout<T: Sendable>(
+        _ seconds: TimeInterval, _ operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask { try await operation() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(seconds))
+                throw URLError(.timedOut)
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw URLError(.timedOut) }
+            return first
+        }
     }
 
     /// Same mapping as the client's own response check.

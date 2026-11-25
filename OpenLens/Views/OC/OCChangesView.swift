@@ -460,7 +460,7 @@ struct OCChangesView: View {
         guard !creatingGit else { return }
         creatingGit = true
         gitError = nil
-        defer { creatingGit = false }
+        // Stays busy until the reload after the init has settled (`load` clears it).
         do {
             try await reviewService.initGitRepository(directory: availability?.directory ?? session.directory)
             availability = nil
@@ -469,6 +469,7 @@ struct OCChangesView: View {
             state = .loading
             reloadToken += 1
         } catch {
+            creatingGit = false
             guard !(error is CancellationError) else { return }
             gitError = OCGitInitMessage.text(for: error)
         }
@@ -486,8 +487,14 @@ struct OCChangesView: View {
                 availability = found
                 guard found.isGit, let first = found.modes.first else {
                     state = .noGit
+                    creatingGit = false
+                    // A request started before this tab was re-mounted is still running: join it.
+                    if reviewService.isInitializingGit(directory: found.directory ?? session.directory) {
+                        Task { await createGit() }
+                    }
                     return
                 }
+                creatingGit = false
                 // Setting the mode re-keys the task, which then loads the files.
                 mode = first
                 return
@@ -505,6 +512,7 @@ struct OCChangesView: View {
             return
         } catch {
             guard !Task.isCancelled else { return }
+            creatingGit = false
             state = .failed(error.localizedDescription)
         }
     }

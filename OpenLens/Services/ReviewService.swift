@@ -5,6 +5,10 @@ final class ReviewService {
     private let connection: ConnectionManager
     /// Carries the Changes tab's own VCS requests (`OCVCSRemote`); tests replace it.
     var vcsTransport: any OpenCodeTransport = DirectOpenCodeTransport()
+    /// How long `vcs.init`, and then the refresh after it, may each run (the web's 30 s).
+    var initTimeout: TimeInterval = OCVCSRemote.timeout
+    /// `vcs.init` runs per folder: a second tap, or a re-mounted tab, joins the running request.
+    private var initTasks: [String: Task<Void, Error>] = [:]
 
     init(connection: ConnectionManager) {
         self.connection = connection
@@ -175,11 +179,14 @@ final class ReviewService {
         }
         let projects = try await client.listProjects()
         // The session's project by id, else the project whose folder holds the session's folder
-        // (the deepest one when they nest).
-        let project = projects.first { projectID != nil && $0.id == projectID }
-            ?? projects
+        // (the deepest one when they nest). A project by id that still reports no repository
+        // (a stale answer right after "Create Git repository") yields to a git project by path.
+        let byID = projects.first { projectID != nil && $0.id == projectID }
+        let byPath = projects
             .filter { OCFileSupport.isInside(directory, root: $0.worktree) }
             .max { ($0.worktree?.count ?? 0) < ($1.worktree?.count ?? 0) }
+        let project = byID?.vcs?.lowercased() == "git" ? byID
+            : (byPath?.vcs?.lowercased() == "git" ? byPath : (byID ?? byPath))
         guard project?.vcs?.lowercased() == "git" else {
             return OCChangesAvailability(isGit: false, modes: [], directory: directory)
         }
@@ -220,15 +227,37 @@ final class ReviewService {
         }.value
     }
 
+    func isInitializingGit(directory: String?) -> Bool {
+        guard let directory = directory?.nilIfBlank else { return false }
+        return initTasks[directory] != nil
+    }
+
     /// The web's "Create a Git repository": `POST /api/vcs/init?provider=git` for exactly the
-    /// given folder (never the client's active one). Without a folder nothing is sent.
+    /// given folder (never the client's active one), cut off after `initTimeout`, followed by a
+    /// refresh of the project list (the web's cache sync) before it counts as finished. Without a
+    /// folder nothing is sent; a second call for the same folder joins the running one.
     func initGitRepository(directory: String?) async throws {
         guard let directory = directory?.nilIfBlank else { throw OCVCSError.unavailable }
+        if let running = initTasks[directory] {
+            try await running.value
+            return
+        }
         guard let client = connection.client else { throw OpenCodeError.notConnected }
-        let endpoint = await client.connectionEndpoint()
-        let request = OCVCSRemote.initRequest(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory)
-        let (data, response) = try await vcsTransport.data(for: request)
-        try OCVCSRemote.validate(response, data: data)
+        let transport = vcsTransport
+        let timeout = initTimeout
+        let task = Task<Void, Error> {
+            let endpoint = await client.connectionEndpoint()
+            let request = OCVCSRemote.initRequest(baseURL: endpoint.baseURL, authHeader: endpoint.authHeader, directory: directory)
+            try await OCVCSRemote.withTimeout(timeout) {
+                let (data, response) = try await transport.data(for: request)
+                try OCVCSRemote.validate(response, data: data)
+            }
+            // The repository exists either way: a refresh that fails or runs long is not a failed init.
+            try? await OCVCSRemote.withTimeout(timeout) { _ = try await client.listProjects() }
+        }
+        initTasks[directory] = task
+        defer { initTasks[directory] = nil }
+        try await task.value
     }
 
     func vcsInfo(directory: String) async throws -> OCVCSInfo {

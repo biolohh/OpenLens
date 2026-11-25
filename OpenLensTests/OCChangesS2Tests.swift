@@ -20,6 +20,7 @@ nonisolated final class S2RecordingTransport: OpenCodeTransport, @unchecked Send
     func data(for request: URLRequest) async throws -> (Data, URLResponse) {
         let url = try #require(request.url)
         lock.lock(); seen.append(request); lock.unlock()
+        if let delay { try await Task.sleep(for: delay) }
         let key = "\(request.httpMethod ?? "GET") \(url.path)"
         lock.lock(); let override = overrides[key]; lock.unlock()
         let route = override ?? routes[key] ?? .status(404, #"{"error":"RouteNotFound"}"#)
@@ -30,6 +31,8 @@ nonisolated final class S2RecordingTransport: OpenCodeTransport, @unchecked Send
         S2UnusedEventStream()
     }
 
+    /// Answers after this long (a hung request stays until cancelled when it is large).
+    nonisolated(unsafe) var delay: Duration?
     private var overrides: [String: Route] = [:]
     func set(_ key: String, _ route: Route) { lock.lock(); overrides[key] = route; lock.unlock() }
 
@@ -395,5 +398,44 @@ struct OCChangesS2Tests {
         let sent = transport.requests(matching: "GET /api/vcs/diff")
         #expect(sent.count == 2)
         #expect(s2Query(sent[0], "mode") == "working")
+    }
+
+    @Test func aSecondInitForTheSameFolderJoinsTheRunningOne() async throws {
+        let (service, transport) = try await makeService(routes: ["POST /api/vcs/init": .status(204, ""), "GET /api/project": .ok("[]")])
+        transport.delay = .milliseconds(300)
+        async let first: Void = service.initGitRepository(directory: "/work/site")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(service.isInitializingGit(directory: "/work/site"))
+        async let second: Void = service.initGitRepository(directory: "/work/site")
+        try await first
+        try await second
+        #expect(transport.requests(matching: "POST /api/vcs/init").count == 1)
+        #expect(!service.isInitializingGit(directory: "/work/site"))
+    }
+
+    @Test func aHungInitIsCutOffAtTheTimeout() async throws {
+        let (service, transport) = try await makeService(routes: ["POST /api/vcs/init": .status(204, "")])
+        transport.delay = .seconds(60)
+        service.initTimeout = 0.2
+        await #expect(throws: URLError.self) { try await service.initGitRepository(directory: "/work/site") }
+        #expect(!service.isInitializingGit(directory: "/work/site"))
+    }
+
+    @Test func aStaleProjectByIdYieldsToAGitProjectByPath() async throws {
+        let (service, _) = try await makeService(routes: [
+            "GET /api/project": .ok(#"[{"id":"global","worktree":"/"},{"id":"p2","worktree":"/work/site","vcs":"git"}]"#),
+            "GET /api/vcs": .ok(#"{"location":{"directory":"/work/site"},"data":{"branch":{"current":"main","default":"main"}}}"#),
+        ])
+        let found = try await service.changesAvailability(sessionID: "s", directory: "/work/site", projectID: "global")
+        #expect(found.isGit)
+        #expect(found.directory == "/work/site")
+    }
+
+    @Test func plusInAFolderNameIsEncoded() throws {
+        let request = OCVCSRemote.initRequest(baseURL: try #require(URL(string: "https://x.example")), authHeader: nil, directory: "/x/a+b c")
+        let text = try #require(request.url?.absoluteString)
+        #expect(text.contains("a%2Bb"))
+        #expect(!text.contains("a+b"))
+        #expect(s2Query(request, "location[directory]") == "/x/a+b c")
     }
 }
