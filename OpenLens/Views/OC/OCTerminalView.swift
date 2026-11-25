@@ -175,7 +175,7 @@ private struct OCTerminalSurface: View {
     /// Where the menu was last shown, to show it again after a handle drag.
     @State private var lastMenuPoint = CGPoint(x: 80, y: 40)
     /// The selection as a handle drag began (the edge being moved and its cell centre).
-    @State private var handleDrag: (edge: OCTerminalSelection.Edge, origin: CGPoint)?
+    @State private var handleDrag: (origin: CGPoint, fixed: OCTerminalPoint)?
 
     private static let viewport = "oc.terminal.viewport"
     private static let rows = "oc.terminal.rows"
@@ -414,13 +414,13 @@ private struct OCTerminalSurface: View {
             let origin = edge == .start
                 ? CGPoint(x: position.x + metrics.cellWidth / 2, y: position.y + metrics.lineHeight / 2)
                 : CGPoint(x: position.x - metrics.cellWidth / 2, y: position.y - metrics.lineHeight / 2)
-            handleDrag = (edge, origin)
+            handleDrag = (origin, selection.fixedPoint(dragging: edge))
             menuRequest = nil
         }
         guard let drag = handleDrag,
               let point = point(at: CGPoint(x: drag.origin.x + translation.width, y: drag.origin.y + translation.height))
         else { return }
-        let moved = selection.moving(drag.edge, to: point)
+        let moved = OCTerminalSelection.dragged(fixed: drag.fixed, to: point)
         if moved != selection { self.selection = moved }
     }
 

@@ -418,16 +418,26 @@ struct OCTerminalSyncTests {
         #expect(box.count >= 1)
     }
 
-    @Test func handlesMoveOneEdgeAndSwapPastTheOther() {
+    /// The edge fixed when the drag begins stays through every move, also after the handles swap.
+    @Test func handleDragKeepsTheFixedEdgeAfterASwap() {
         let selection = OCTerminalSelection(
             anchor: OCTerminalPoint(line: 5, column: 4), head: OCTerminalPoint(line: 3, column: 2)
         )
-        let extended = selection.moving(.end, to: OCTerminalPoint(line: 7, column: 1))
-        #expect(extended.start == OCTerminalPoint(line: 3, column: 2))
-        #expect(extended.end == OCTerminalPoint(line: 7, column: 1))
-        let swapped = selection.moving(.start, to: OCTerminalPoint(line: 9, column: 0))
-        #expect(swapped.start == OCTerminalPoint(line: 5, column: 4))
-        #expect(swapped.end == OCTerminalPoint(line: 9, column: 0))
+        let fixed = selection.fixedPoint(dragging: .start)
+        #expect(fixed == OCTerminalPoint(line: 5, column: 4))
+        let first = OCTerminalSelection.dragged(fixed: fixed, to: OCTerminalPoint(line: 9, column: 0))
+        #expect(first.start == OCTerminalPoint(line: 5, column: 4))
+        #expect(first.end == OCTerminalPoint(line: 9, column: 0))
+        let second = OCTerminalSelection.dragged(fixed: fixed, to: OCTerminalPoint(line: 9, column: 1))
+        #expect(second.start == OCTerminalPoint(line: 5, column: 4))
+        #expect(second.end == OCTerminalPoint(line: 9, column: 1))
+        // The end handle dragged above the start: the start stays the far edge.
+        let endFixed = selection.fixedPoint(dragging: .end)
+        let up1 = OCTerminalSelection.dragged(fixed: endFixed, to: OCTerminalPoint(line: 1, column: 0))
+        let up2 = OCTerminalSelection.dragged(fixed: endFixed, to: OCTerminalPoint(line: 0, column: 3))
+        #expect(up1.end == OCTerminalPoint(line: 3, column: 2))
+        #expect(up2.start == OCTerminalPoint(line: 0, column: 3))
+        #expect(up2.end == OCTerminalPoint(line: 3, column: 2))
     }
 
     /// The web's 20 000 limit is a JavaScript length: UTF-16 units.

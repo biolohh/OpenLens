@@ -96,10 +96,15 @@ nonisolated struct OCTerminalSelection: Equatable, Sendable {
     var anchor: OCTerminalPoint
     var head: OCTerminalPoint
 
-    /// A handle drag: the other edge stays, the dragged one follows the finger (past the other
-    /// edge they swap, as with text selection).
-    func moving(_ edge: Edge, to point: OCTerminalPoint) -> OCTerminalSelection {
-        OCTerminalSelection(anchor: edge == .start ? end : start, head: point)
+    /// The edge a handle drag keeps in place: fixed when the drag begins, so a handle dragged past
+    /// the other edge (they swap) keeps the original far edge on every later move.
+    func fixedPoint(dragging edge: Edge) -> OCTerminalPoint {
+        edge == .start ? end : start
+    }
+
+    /// A handle drag step: the edge fixed at the start of the drag stays, the finger's cell moves.
+    static func dragged(fixed: OCTerminalPoint, to point: OCTerminalPoint) -> OCTerminalSelection {
+        OCTerminalSelection(anchor: fixed, head: point)
     }
 
     /// The web's limit counts UTF-16 code units (JavaScript string length).
