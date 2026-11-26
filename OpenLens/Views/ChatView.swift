@@ -1,6 +1,7 @@
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 /// Main chat interface.
 /// Keeps view-local UI state and delegates IO to shared services.
@@ -891,6 +892,11 @@ struct ChatView: View {
             Button(AppText.attachPhotos, systemImage: "photo.on.rectangle") {
                 attachmentSource = .photos
             }
+            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                Button(AppText.attachCamera, systemImage: "camera") {
+                    attachmentSource = .camera
+                }
+            }
             Button(AppText.attachFromFiles, systemImage: "folder") {
                 attachmentSource = .files
             }
@@ -915,6 +921,14 @@ struct ChatView: View {
             matching: .images,
             preferredItemEncoding: .compatible
         )
+        .fullScreenCover(isPresented: attachmentSourceBinding(.camera)) {
+            ComposerCameraPicker { data in
+                attachmentSource = nil
+                guard let data else { return }
+                Task { await chatClient.attachComposerImage(data: data) }
+            }
+            .ignoresSafeArea()
+        }
         .fileImporter(
             isPresented: attachmentSourceBinding(.files),
             allowedContentTypes: [.text, .sourceCode, .json, .xml, .yaml, .data],
@@ -3728,6 +3742,37 @@ enum ChatScrollPolicy {
 
 private enum ComposerAttachmentSource {
     case photos
+    case camera
     case files
     case repository
+}
+
+/// Camera capture for the composer: takes one photo and hands back JPEG data (nil on cancel).
+private struct ComposerCameraPicker: UIViewControllerRepresentable {
+    let onFinish: (Data?) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    func makeUIViewController(context: Context) -> UIImagePickerController {
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.cameraCaptureMode = .photo
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
+
+    final class Coordinator: NSObject, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
+        let onFinish: (Data?) -> Void
+        init(onFinish: @escaping (Data?) -> Void) { self.onFinish = onFinish }
+
+        func imagePickerController(_ picker: UIImagePickerController,
+                                   didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+            let image = info[.originalImage] as? UIImage
+            onFinish(image?.jpegData(compressionQuality: 0.85))
+        }
+
+        func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { onFinish(nil) }
+    }
 }

@@ -118,6 +118,7 @@ enum AppText {
     static let attachFiles = "Attach files"
     static let attachFromFiles = "Files"
     static let attachPhotos = "Photos"
+    static let attachCamera = "Camera"
     static let attachRepositoryFile = "Repository File"
     static let attachedFile = "Attached file"
     static let attachedImage = "Attached image"
